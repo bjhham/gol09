@@ -3,7 +3,9 @@ package org.jetbrains.game
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.drawscope.Stroke
 
 /**
  * Something that occupies a cell on the [GameGrid] and knows how to paint
@@ -277,5 +279,83 @@ data class Golem(
         const val EYE_SIZE_RATIO = 0.30f
         const val EYE_INSET_RATIO = 0.10f
         const val EYE_VERTICAL_RATIO = 0.40f
+    }
+}
+
+/**
+ * A piece of cheese sitting on the grid. Reaching the cell that contains a
+ * [Cheese] completes the current level.
+ *
+ * Rendered as a schematic yellow wedge with a few darker holes; the same
+ * drawing is used regardless of how the player approaches it, so there are
+ * no per-orientation variants.
+ */
+data class Cheese(
+    override val position: Position,
+) : GameToken {
+
+    override fun paint(scope: DrawScope, cellOrigin: Offset, cellSize: Float) {
+        // Reserve a small margin around the wedge so adjacent tokens stay visually distinct.
+        val margin = cellSize * MARGIN_RATIO
+        val extent = cellSize - 2f * margin
+        val left = cellOrigin.x + margin
+        val top = cellOrigin.y + margin
+
+        // The wedge is a right triangle filling the cell: the pointed tip
+        // is at the top-left, and the wide back runs from the top-right
+        // corner down to the bottom-right corner. This gives the iconic
+        // cartoon "slice of cheese" silhouette.
+        val tip = Offset(left, top)
+        val backTop = Offset(left + extent, top)
+        val backBottom = Offset(left + extent, top + extent)
+
+        val wedge = Path().apply {
+            moveTo(tip.x, tip.y)
+            lineTo(backTop.x, backTop.y)
+            lineTo(backBottom.x, backBottom.y)
+            close()
+        }
+        scope.drawPath(path = wedge, color = CHEESE_COLOR)
+        scope.drawPath(
+            path = wedge,
+            color = CHEESE_RIND_COLOR,
+            style = Stroke(width = extent * RIND_STROKE_RATIO),
+        )
+
+        // A few darker "holes" punched into the wedge, positioned in the
+        // body of the slice rather than near the tip.
+        val holeRadius = extent * HOLE_RADIUS_RATIO
+        for ((cx, cy) in HOLE_OFFSETS) {
+            scope.drawCircle(
+                color = HOLE_COLOR,
+                radius = holeRadius,
+                center = Offset(left + extent * cx, top + extent * cy),
+            )
+        }
+    }
+
+    private companion object {
+        val CHEESE_COLOR = Color(0xFFFFC107)
+        val CHEESE_RIND_COLOR = Color(0xFFB8860B)
+        val HOLE_COLOR = Color(0xFFB8860B)
+
+        // Margin around the wedge, as a fraction of the cell size.
+        const val MARGIN_RATIO = 0.1f
+
+        // Outline thickness, as a fraction of the wedge's extent.
+        const val RIND_STROKE_RATIO = 0.04f
+
+        // Radius of each "hole", as a fraction of the wedge's extent.
+        const val HOLE_RADIUS_RATIO = 0.07f
+
+        // Centres of the holes, as `(x, y)` fractions of the wedge's extent.
+        // Chosen to sit comfortably inside the wedge body. The wedge fills
+        // the half of the cell where `y <= x`, so each centre satisfies
+        // that constraint with enough slack for the hole's radius.
+        val HOLE_OFFSETS = listOf(
+            0.50f to 0.30f,
+            0.78f to 0.45f,
+            0.82f to 0.72f,
+        )
     }
 }

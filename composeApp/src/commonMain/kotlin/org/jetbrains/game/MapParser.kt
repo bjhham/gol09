@@ -12,6 +12,7 @@ package org.jetbrains.game
  *
  * Supported object references:
  *  - `START` — the cell where the golem starts. The golem initially faces [Direction.SOUTH].
+ *  - `CHEESE` — a cheese pickup. Reaching this cell completes the level.
  *
  * Lines that are blank or that begin with `#` are ignored.
  */
@@ -24,6 +25,7 @@ class MapParser {
      */
     fun parse(text: String): GameGrid {
         var start: Position? = null
+        val cheeses = mutableListOf<Cheese>()
 
         text.lineSequence().forEachIndexed { index, rawLine ->
             val line = rawLine.trim()
@@ -39,6 +41,10 @@ class MapParser {
                     }
                     start = entry.position
                 }
+                "CHEESE" -> {
+                    validatePosition(entry.position, lineNumber = index + 1)
+                    cheeses += Cheese(position = entry.position)
+                }
                 else -> throw MapParseException(
                     "Unknown object reference '${entry.ref}' on line ${index + 1}",
                 )
@@ -51,7 +57,7 @@ class MapParser {
         validatePosition(startPos)
 
         return GameGrid(
-            tokens = listOf(Golem(position = startPos, facing = Direction.SOUTH)),
+            tokens = listOf(Golem(position = startPos, facing = Direction.SOUTH)) + cheeses,
         )
     }
 
@@ -76,11 +82,12 @@ class MapParser {
         return Entry(ref, Position(x, y))
     }
 
-    private fun validatePosition(position: Position) {
+    private fun validatePosition(position: Position, lineNumber: Int? = null) {
         if (position.x !in 0 until GRID_SIZE || position.y !in 0 until GRID_SIZE) {
+            val suffix = lineNumber?.let { " on line $it" } ?: ""
             throw MapParseException(
                 "Position (${position.x}, ${position.y}) is outside the " +
-                    "${GRID_SIZE}x${GRID_SIZE} grid",
+                    "${GRID_SIZE}x${GRID_SIZE} grid$suffix",
             )
         }
     }

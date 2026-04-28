@@ -3,6 +3,7 @@ package org.jetbrains
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -13,6 +14,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material3.Button
+import androidx.compose.material3.Card
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -43,6 +46,7 @@ import kscript.bridgeFunction
 import kscript.bridgeFunctionVoid
 import kscript.emptyProcessState
 import kscript.parseFile
+import org.jetbrains.game.Cheese
 import org.jetbrains.game.GameGrid
 import org.jetbrains.game.MapParser
 
@@ -79,6 +83,27 @@ fun App() {
 
         // Whether the simulation is currently running. Toggled by the play/pause button.
         var isRunning by remember { mutableStateOf(false) }
+
+        // Whether the player has acknowledged the level-complete overlay for the
+        // current level. Reset when the grid is reset (e.g. via refresh) so the
+        // overlay can appear again if the level is replayed.
+        var levelCompleteDismissed by remember { mutableStateOf(false) }
+
+        // The level is complete as soon as the golem occupies a cell that
+        // contains a [Cheese]. Recomputed from the current grid so the overlay
+        // appears the moment the simulation steps onto the goal cell.
+        val levelComplete = gameGrid?.let { grid ->
+            val golemPos = grid.golem.position
+            grid.tokens.any { it is Cheese && it.position == golemPos }
+        } ?: false
+
+        // Pause the simulation immediately when the level is completed so the
+        // script doesn't keep ticking under the celebration overlay.
+        LaunchedEffect(levelComplete) {
+            if (levelComplete) {
+                isRunning = false
+            }
+        }
 
         // The user's source code, plus its most recently parsed `KFile`. The
         // file is `null` while the editor is empty or while the current text
@@ -135,6 +160,7 @@ fun App() {
             }
         }
 
+        Box(modifier = Modifier.fillMaxSize()) {
         Column(
             modifier = Modifier
                 .background(MaterialTheme.colorScheme.background)
@@ -211,6 +237,7 @@ fun App() {
                     onClick = {
                         isRunning = false
                         gameGrid = initial
+                        levelCompleteDismissed = false
                     },
                     enabled = !isInitialState,
                 ) {
@@ -225,7 +252,7 @@ fun App() {
                 // available so they can stop the simulation.
                 IconButton(
                     onClick = { isRunning = !isRunning },
-                    enabled = isRunning || kFile != null,
+                    enabled = isRunning || (kFile != null && !levelComplete),
                 ) {
                     if (isRunning) {
                         Icon(
@@ -267,6 +294,40 @@ fun App() {
                     .padding(8.dp),
                 label = { Text("Code") },
             )
+        }
+
+        // Level-complete overlay. When the golem occupies a Cheese cell and
+        // the player has not yet dismissed the celebration, draw a dimming
+        // scrim over the whole screen with a centred card congratulating the
+        // player and offering a button to continue to the next level.
+        if (levelComplete && !levelCompleteDismissed) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.6f)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Card(modifier = Modifier.padding(24.dp)) {
+                    Column(
+                        modifier = Modifier.padding(24.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        Text(
+                            text = "Level complete!",
+                            style = MaterialTheme.typography.headlineSmall,
+                        )
+                        Text(
+                            text = "The golem reached the cheese.",
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                        Button(onClick = { levelCompleteDismissed = true }) {
+                            Text("Continue")
+                        }
+                    }
+                }
+            }
+        }
         }
     }
 }

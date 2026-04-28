@@ -24,6 +24,33 @@ class MapParserTest {
     }
 
     @Test
+    fun parses_cheese_entries_into_cheese_tokens() {
+        val text = """
+            START 0,0
+            CHEESE 11,11
+        """.trimIndent()
+
+        val model = parser.parse(text)
+
+        assertEquals(Position(0, 0), model.golem.position)
+        // The cheese should be present alongside the golem in the rendered token list.
+        assertEquals(
+            listOf(
+                Golem(Position(0, 0), Direction.SOUTH),
+                Cheese(Position(11, 11)),
+            ),
+            model.tokens,
+        )
+    }
+
+    @Test
+    fun cheese_out_of_bounds_throws() {
+        assertFailsWith<MapParseException> {
+            parser.parse("START 0,0\nCHEESE 12,0\n")
+        }
+    }
+
+    @Test
     fun ignores_blank_lines_and_comments() {
         val text = """
             # This is a comment
