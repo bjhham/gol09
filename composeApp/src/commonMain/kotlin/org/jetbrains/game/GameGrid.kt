@@ -34,7 +34,7 @@ data class Golem(
  *
  * The grid is fixed at [GRID_SIZE] x [GRID_SIZE] cells.
  */
-data class GameModel(
+data class GameGrid(
     val width: Int = GRID_SIZE,
     val height: Int = GRID_SIZE,
     val golem: Golem,

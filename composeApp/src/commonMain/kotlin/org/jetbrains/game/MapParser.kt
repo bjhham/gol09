@@ -1,7 +1,7 @@
 package org.jetbrains.game
 
 /**
- * Parses a map file describing a single stage and produces a [GameModel].
+ * Parses a map file describing a single stage and produces a [GameGrid].
  *
  * The map file is a plain-text file where each non-blank line has the form:
  *
@@ -18,11 +18,11 @@ package org.jetbrains.game
 class MapParser {
 
     /**
-     * Parse the contents of a map file into a [GameModel].
+     * Parse the contents of a map file into a [GameGrid].
      *
      * @throws MapParseException if the input is malformed or required objects are missing.
      */
-    fun parse(text: String): GameModel {
+    fun parse(text: String): GameGrid {
         var start: Position? = null
 
         text.lineSequence().forEachIndexed { index, rawLine ->
@@ -50,7 +50,7 @@ class MapParser {
 
         validatePosition(startPos)
 
-        return GameModel(
+        return GameGrid(
             golem = Golem(position = startPos, facing = Direction.SOUTH),
         )
     }
