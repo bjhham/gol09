@@ -55,6 +55,7 @@ kotlin {
             implementation(libs.androidx.lifecycle.viewmodelCompose)
             implementation(libs.androidx.lifecycle.runtimeCompose)
             implementation(projects.shared)
+            implementation(libs.kotlinx.io)
             implementation("org.jetbrains:kscript:1.0.0-SNAPSHOT")
         }
         commonTest.dependencies {
