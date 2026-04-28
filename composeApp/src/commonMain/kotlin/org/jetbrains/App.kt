@@ -9,6 +9,10 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeContentPadding
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -140,7 +144,17 @@ fun App() {
                 horizontalArrangement = Arrangement.End,
             ) {
                 IconButton(onClick = { isRunning = !isRunning }) {
-                    Text(if (isRunning) "⏸" else "▶")
+                    if (isRunning) {
+                        Icon(
+                            imageVector = Icons.Filled.Pause,
+                            contentDescription = "Pause",
+                        )
+                    } else {
+                        Icon(
+                            imageVector = Icons.Filled.PlayArrow,
+                            contentDescription = "Play",
+                        )
+                    }
                 }
             }
 
