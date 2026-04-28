@@ -68,6 +68,13 @@ fun App() {
         // Whether the simulation is currently running. Toggled by the play/pause button.
         var isRunning by remember { mutableStateOf(false) }
 
+        // The user's source code, plus its most recently parsed `KFile`. The
+        // file is `null` while the editor is empty or while the current text
+        // fails to parse; in both cases there's nothing for the runner to
+        // execute, so the play button stays disabled.
+        var code by remember { mutableStateOf("") }
+        var kFile by remember { mutableStateOf<KFile?>(null) }
+
         LaunchedEffect(Unit) {
             val bytes = Res.readBytes(INITIAL_MAP_PATH)
             val parsed = MapParser().parse(bytes.decodeToString())
@@ -170,7 +177,14 @@ fun App() {
                         contentDescription = "Refresh",
                     )
                 }
-                IconButton(onClick = { isRunning = !isRunning }) {
+                // Play/pause toggles the simulation. The play button is disabled
+                // while there is no successfully-parsed `KFile` for the runner to
+                // consume; once the user is running, the pause action is always
+                // available so they can stop the simulation.
+                IconButton(
+                    onClick = { isRunning = !isRunning },
+                    enabled = isRunning || kFile != null,
+                ) {
                     if (isRunning) {
                         Icon(
                             imageVector = Icons.Filled.Pause,
@@ -190,20 +204,21 @@ fun App() {
             // The text is re-parsed on every change and the resulting `KFile` is
             // stored in state for the script runner to consume later. Parsing
             // failures are expected while the user is mid-edit, so we swallow
-            // `CompilationException` and simply leave the previous `KFile` in
-            // place (or `null` if nothing has parsed successfully yet).
-            var code by remember { mutableStateOf("") }
-            var kFile by remember { mutableStateOf<KFile?>(null) }
+            // `CompilationException` and simply leave `kFile` as `null` until
+            // the input parses cleanly again. While the simulation is running
+            // the text field is disabled so the code can't change underneath
+            // the runner.
             OutlinedTextField(
                 value = code,
                 onValueChange = { newCode ->
                     code = newCode
                     kFile = try {
                         scriptParser.parseFile(newCode)
-                    } catch (_: Exception) {
+                    } catch (_: CompilationException) {
                         null
                     }
                 },
+                enabled = !isRunning,
                 modifier = Modifier
                     .fillMaxWidth()
                     .weight(1f)
