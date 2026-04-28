@@ -15,8 +15,8 @@ class MapParserTest {
 
         val model = parser.parse(text)
 
-        assertEquals(24, model.width)
-        assertEquals(24, model.height)
+        assertEquals(12, model.width)
+        assertEquals(12, model.height)
         assertEquals(Position(0, 0), model.golem.position)
         assertEquals(Direction.SOUTH, model.golem.facing)
         // The golem must also appear in the rendered token list.
@@ -61,7 +61,7 @@ class MapParserTest {
     @Test
     fun out_of_bounds_position_throws() {
         assertFailsWith<MapParseException> {
-            parser.parse("START 24,0\n")
+            parser.parse("START 12,0\n")
         }
         assertFailsWith<MapParseException> {
             parser.parse("START -1,0\n")
