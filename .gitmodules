@@ -1,0 +1,3 @@
+[submodule "kscript"]
+	path = kscript
+	url = git@github.com:bjhham/kscript.git
