@@ -19,7 +19,6 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -287,18 +286,20 @@ fun App() {
                 }
             }
 
-            // Lower half: text area for the user's code input.
+            // Lower half: rich code editor for the user's source input.
             //
             // The text is re-parsed on every change and the resulting `KFile` is
-            // stored in state for the script runner to consume later. Parsing
-            // failures are expected while the user is mid-edit, so we swallow
-            // `CompilationException` and simply leave `kFile` as `null` until
-            // the input parses cleanly again. While the simulation is running
-            // the text field is disabled so the code can't change underneath
-            // the runner.
-            OutlinedTextField(
-                value = code,
-                onValueChange = { newCode ->
+            // stored in state for both the script runner and the editor itself
+            // to consume — the editor uses it to drive token-based syntax
+            // highlighting. Parsing failures are expected while the user is
+            // mid-edit, so we swallow `CompilationException` and simply leave
+            // `kFile` as `null` until the input parses cleanly again; the
+            // editor falls back to unstyled rendering in that case. While the
+            // simulation is running the editor is disabled so the code can't
+            // change underneath the runner.
+            CodeEditor(
+                code = code,
+                onCodeChange = { newCode ->
                     code = newCode
                     kFile = try {
                         scriptParser.parseFile(newCode)
@@ -307,12 +308,12 @@ fun App() {
                         null
                     }
                 },
+                kFile = kFile,
                 enabled = !isRunning,
                 modifier = Modifier
                     .fillMaxWidth()
                     .weight(1f)
                     .padding(8.dp),
-                label = { Text("Code") },
             )
         }
 
