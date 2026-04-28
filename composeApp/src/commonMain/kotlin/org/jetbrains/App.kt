@@ -262,6 +262,7 @@ fun App() {
                     Icon(
                         imageVector = Icons.Filled.Refresh,
                         contentDescription = "Refresh",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
                 // Play/pause toggles the simulation. The play button is disabled
@@ -276,11 +277,13 @@ fun App() {
                         Icon(
                             imageVector = Icons.Filled.Pause,
                             contentDescription = "Pause",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     } else {
                         Icon(
                             imageVector = Icons.Filled.PlayArrow,
                             contentDescription = "Play",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
                 }
