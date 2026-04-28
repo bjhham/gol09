@@ -39,11 +39,16 @@ import kotlinx.coroutines.delay
 import kscript.CompilationException
 import kscript.KFile
 import kscript.KIdentifier
+import kscript.KInt
 import kscript.KScriptParser
 import kscript.KScriptRunner
+import kscript.KToken
+import kscript.KTokenData
+import kscript.KTokenType
 import kscript.KUnit
 import kscript.bridgeFunction
 import kscript.bridgeFunctionVoid
+import kscript.bridgeGetter
 import kscript.emptyProcessState
 import kscript.parseFile
 import org.jetbrains.game.Cheese
@@ -149,10 +154,24 @@ fun App() {
             val turnLeftFn = bridgeFunctionVoid("turnLeft") {
                 gameGrid = gameGrid?.turnGolemLeft()
             }
+            // Bridge getters expose the golem's current coordinates to the script.
+            // They re-evaluate on every reference so the script always sees the
+            // up-to-date position after `move()` calls.
+            val intType = KIdentifier("Int")
+            val xGetter = bridgeGetter("x", intType) {
+                val value = gameGrid?.golem?.position?.x ?: 0
+                KInt(KToken(KTokenData.Text(KTokenType.INTEGER_LITERAL, value.toString())), value)
+            }
+            val yGetter = bridgeGetter("y", intType) {
+                val value = gameGrid?.golem?.position?.y ?: 0
+                KInt(KToken(KTokenData.Text(KTokenType.INTEGER_LITERAL, value.toString())), value)
+            }
             val state = emptyProcessState().apply {
                 this[KIdentifier("move")] = moveFn
                 this[KIdentifier("turnRight")] = turnRightFn
                 this[KIdentifier("turnLeft")] = turnLeftFn
+                this[xGetter.name] = xGetter
+                this[yGetter.name] = yGetter
             }
             while (true) {
                 val file = kFile ?: break
@@ -283,7 +302,8 @@ fun App() {
                     code = newCode
                     kFile = try {
                         scriptParser.parseFile(newCode)
-                    } catch (_: CompilationException) {
+                    } catch (e: CompilationException) {
+                        e.printStackTrace()
                         null
                     }
                 },
