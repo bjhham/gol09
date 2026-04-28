@@ -62,4 +62,52 @@ class GameGridTest {
             assertSame(grid, grid.moveGolem(), "for $position facing $direction")
         }
     }
+
+    @Test
+    fun turnGolemRight_rotates_clockwise_through_all_directions() {
+        val cases = listOf(
+            Direction.NORTH to Direction.EAST,
+            Direction.EAST to Direction.SOUTH,
+            Direction.SOUTH to Direction.WEST,
+            Direction.WEST to Direction.NORTH,
+        )
+        for ((from, expected) in cases) {
+            val grid = GameGrid(
+                tokens = listOf(Golem(Position(5, 5), from)),
+            )
+            val turned = grid.turnGolemRight()
+            assertEquals(expected, turned.golem.facing, "right from $from")
+            assertEquals(Position(5, 5), turned.golem.position, "right from $from preserves position")
+        }
+    }
+
+    @Test
+    fun turnGolemLeft_rotates_counter_clockwise_through_all_directions() {
+        val cases = listOf(
+            Direction.NORTH to Direction.WEST,
+            Direction.WEST to Direction.SOUTH,
+            Direction.SOUTH to Direction.EAST,
+            Direction.EAST to Direction.NORTH,
+        )
+        for ((from, expected) in cases) {
+            val grid = GameGrid(
+                tokens = listOf(Golem(Position(5, 5), from)),
+            )
+            val turned = grid.turnGolemLeft()
+            assertEquals(expected, turned.golem.facing, "left from $from")
+            assertEquals(Position(5, 5), turned.golem.position, "left from $from preserves position")
+        }
+    }
+
+    @Test
+    fun four_right_turns_returns_to_original_direction() {
+        val grid = GameGrid(
+            tokens = listOf(Golem(Position(3, 7), Direction.NORTH)),
+        )
+
+        val rotated = grid.turnGolemRight().turnGolemRight().turnGolemRight().turnGolemRight()
+
+        assertEquals(Direction.NORTH, rotated.golem.facing)
+        assertEquals(Position(3, 7), rotated.golem.position)
+    }
 }

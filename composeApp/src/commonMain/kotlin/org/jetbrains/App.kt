@@ -104,21 +104,32 @@ fun App() {
             gameGrid = parsed
         }
 
-        // Drive the simulation while running: tick every SIMULATION_TICK_MILLIS,
-        // and on each tick execute the user's parsed `KFile` via `scriptRunner`.
-        // The script can call the bridged `move()` function, which advances the
-        // golem one cell in its facing direction. Pausing cancels this effect
-        // immediately, stopping the loop.
+        // Drive the simulation while running: execute the user's parsed `KFile`
+        // via `scriptRunner` in a loop. The script can call the bridged
+        // `move()` function, which advances the golem one cell in its facing
+        // direction and waits SIMULATION_TICK_MILLIS so movement is paced.
+        // It can also call `turnRight()` / `turnLeft()` to rotate the golem
+        // in place; turning updates state immediately and does not advance
+        // simulation time. Pausing cancels this effect immediately, stopping
+        // the loop.
         LaunchedEffect(isRunning) {
             if (!isRunning) return@LaunchedEffect
             val moveFn = bridgeFunctionVoid("move") {
                 gameGrid = gameGrid?.moveGolem()
+                delay(SIMULATION_TICK_MILLIS)
+            }
+            val turnRightFn = bridgeFunctionVoid("turnRight") {
+                gameGrid = gameGrid?.turnGolemRight()
+            }
+            val turnLeftFn = bridgeFunctionVoid("turnLeft") {
+                gameGrid = gameGrid?.turnGolemLeft()
             }
             val state = emptyProcessState().apply {
                 this[KIdentifier("move")] = moveFn
+                this[KIdentifier("turnRight")] = turnRightFn
+                this[KIdentifier("turnLeft")] = turnLeftFn
             }
             while (true) {
-                delay(SIMULATION_TICK_MILLIS)
                 val file = kFile ?: break
                 scriptRunner.execute(file, state)
             }

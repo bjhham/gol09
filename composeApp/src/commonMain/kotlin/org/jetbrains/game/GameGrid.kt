@@ -69,4 +69,25 @@ data class GameGrid(
         val moved = current.copy(position = next)
         return copy(tokens = tokens.map { if (it === current) moved else it })
     }
+
+    /**
+     * Returns a new [GameGrid] with the golem rotated 90 degrees clockwise
+     * (i.e. turned to its right). The golem's position is unchanged.
+     */
+    fun turnGolemRight(): GameGrid = rotateGolem(1)
+
+    /**
+     * Returns a new [GameGrid] with the golem rotated 90 degrees
+     * counter-clockwise (i.e. turned to its left). The golem's position is
+     * unchanged.
+     */
+    fun turnGolemLeft(): GameGrid = rotateGolem(-1)
+
+    private fun rotateGolem(steps: Int): GameGrid {
+        val current = golem
+        val directions = Direction.entries
+        val newFacing = directions[(current.facing.ordinal + steps).mod(directions.size)]
+        val turned = current.copy(facing = newFacing)
+        return copy(tokens = tokens.map { if (it === current) turned else it })
+    }
 }
