@@ -35,8 +35,12 @@ import kotlin.math.min
 import kotlinx.coroutines.delay
 import kscript.CompilationException
 import kscript.KFile
+import kscript.KIdentifier
 import kscript.KScriptParser
 import kscript.KScriptRunner
+import kscript.KUnit
+import kscript.bridgeFunction
+import kscript.emptyProcessState
 import kscript.parseFile
 import org.jetbrains.game.GameGrid
 import org.jetbrains.game.MapParser
@@ -53,6 +57,13 @@ private const val INITIAL_MAP_PATH = "files/maps/level0"
  * Delay between simulation ticks, in milliseconds, while the simulation is running.
  */
 private const val SIMULATION_TICK_MILLIS = 500L
+
+/**
+ * Source code that initially populates the editor. Provides a working program
+ * for the first puzzle and demonstrates how the `move()` bridge function
+ * advances the golem one cell per call.
+ */
+private const val INITIAL_CODE = "move()"
 
 @Composable
 @Preview
@@ -71,9 +82,19 @@ fun App() {
         // The user's source code, plus its most recently parsed `KFile`. The
         // file is `null` while the editor is empty or while the current text
         // fails to parse; in both cases there's nothing for the runner to
-        // execute, so the play button stays disabled.
-        var code by remember { mutableStateOf("") }
-        var kFile by remember { mutableStateOf<KFile?>(null) }
+        // execute, so the play button stays disabled. The editor is
+        // pre-populated with `move()` so the first puzzle has a working
+        // program out of the box.
+        var code by remember { mutableStateOf(INITIAL_CODE) }
+        var kFile by remember {
+            mutableStateOf(
+                try {
+                    scriptParser.parseFile(INITIAL_CODE)
+                } catch (_: CompilationException) {
+                    null
+                }
+            )
+        }
 
         LaunchedEffect(Unit) {
             val bytes = Res.readBytes(INITIAL_MAP_PATH)
@@ -83,13 +104,23 @@ fun App() {
         }
 
         // Drive the simulation while running: tick every SIMULATION_TICK_MILLIS,
-        // moving the golem one cell in its facing direction. Pausing cancels this
-        // effect immediately, stopping the loop.
+        // and on each tick execute the user's parsed `KFile` via `scriptRunner`.
+        // The script can call the bridged `move()` function, which advances the
+        // golem one cell in its facing direction. Pausing cancels this effect
+        // immediately, stopping the loop.
         LaunchedEffect(isRunning) {
             if (!isRunning) return@LaunchedEffect
+            val moveFn = bridgeFunction("move") {
+                gameGrid = gameGrid?.moveGolem()
+                KUnit
+            }
+            val state = emptyProcessState().apply {
+                this[KIdentifier("move")] = moveFn
+            }
             while (true) {
                 delay(SIMULATION_TICK_MILLIS)
-                gameGrid = gameGrid?.moveGolem()
+                val file = kFile ?: break
+                scriptRunner.execute(file, state)
             }
         }
 
