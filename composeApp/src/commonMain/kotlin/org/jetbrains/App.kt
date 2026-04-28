@@ -77,7 +77,7 @@ private const val INITIAL_CODE = "move()"
 @Composable
 @Preview
 fun App() {
-    MaterialTheme {
+    AppTheme {
         // The freshly-parsed initial game grid. `null` until the initial map has finished loading.
         // This is used both as the starting state and as the target of the refresh button.
         var initialGrid by remember { mutableStateOf<GameGrid?>(null) }
