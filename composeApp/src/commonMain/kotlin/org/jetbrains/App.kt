@@ -21,10 +21,12 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import gol09.composeapp.generated.resources.Res
+import kotlin.math.min
 import kscript.KScriptParser
 import kscript.KScriptRunner
 import org.jetbrains.game.GameGrid
@@ -57,8 +59,6 @@ fun App() {
                 .fillMaxSize(),
         ) {
             // Upper half: canvas for drawing the game state.
-            // Read `gameGrid` here so changes to the loaded model trigger recomposition;
-            // actual rendering will be implemented in a follow-up.
             val currentGrid = gameGrid
             Canvas(
                 modifier = Modifier
@@ -66,8 +66,47 @@ fun App() {
                     .weight(1f)
                     .background(Color.Black),
             ) {
-                // TODO: render `currentGrid` once rendering is implemented.
-                currentGrid?.let { /* no-op for now */ }
+                currentGrid?.let { grid ->
+                    // Use square cells and centre the grid inside the canvas.
+                    val cellSize = min(
+                        size.width / grid.width,
+                        size.height / grid.height,
+                    )
+                    val gridWidth = cellSize * grid.width
+                    val gridHeight = cellSize * grid.height
+                    val originX = (size.width - gridWidth) / 2f
+                    val originY = (size.height - gridHeight) / 2f
+
+                    // Draw faint grid lines so the 24x24 cell divisions are visible.
+                    val gridLineColor = Color.White.copy(alpha = 0.25f)
+                    val gridLineStroke = 1f
+                    for (col in 0..grid.width) {
+                        val x = originX + col * cellSize
+                        drawLine(
+                            color = gridLineColor,
+                            start = Offset(x, originY),
+                            end = Offset(x, originY + gridHeight),
+                            strokeWidth = gridLineStroke,
+                        )
+                    }
+                    for (row in 0..grid.height) {
+                        val y = originY + row * cellSize
+                        drawLine(
+                            color = gridLineColor,
+                            start = Offset(originX, y),
+                            end = Offset(originX + gridWidth, y),
+                            strokeWidth = gridLineStroke,
+                        )
+                    }
+
+                    for (token in grid.tokens) {
+                        val cellOrigin = Offset(
+                            x = originX + token.position.x * cellSize,
+                            y = originY + token.position.y * cellSize,
+                        )
+                        token.paint(this, cellOrigin, cellSize)
+                    }
+                }
             }
 
             // Status bar: empty for now, with a play button on the right

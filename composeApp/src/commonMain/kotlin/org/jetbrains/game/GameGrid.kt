@@ -22,20 +22,17 @@ enum class Direction {
 }
 
 /**
- * The golem entity, including its current position and the direction it is facing.
- */
-data class Golem(
-    val position: Position,
-    val facing: Direction,
-)
-
-/**
  * The parsed model of a single stage / level.
  *
- * The grid is fixed at [GRID_SIZE] x [GRID_SIZE] cells.
+ * The grid is fixed at [GRID_SIZE] x [GRID_SIZE] cells. All renderable
+ * entities live in [tokens]; [golem] is provided as a convenience accessor
+ * to the (single) [Golem] in the grid.
  */
 data class GameGrid(
     val width: Int = GRID_SIZE,
     val height: Int = GRID_SIZE,
-    val golem: Golem,
-)
+    val tokens: List<GameToken>,
+) {
+    val golem: Golem
+        get() = tokens.filterIsInstance<Golem>().single()
+}

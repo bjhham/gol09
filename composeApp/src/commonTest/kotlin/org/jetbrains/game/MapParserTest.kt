@@ -10,7 +10,7 @@ class MapParserTest {
 
     @Test
     fun parses_level0_start_in_top_left_facing_south() {
-        // The contents of composeApp/src/commonMain/resources/maps/level0.
+        // The contents of composeApp/src/commonMain/composeResources/files/maps/level0.
         val text = "START 0,0\n"
 
         val model = parser.parse(text)
@@ -19,6 +19,8 @@ class MapParserTest {
         assertEquals(24, model.height)
         assertEquals(Position(0, 0), model.golem.position)
         assertEquals(Direction.SOUTH, model.golem.facing)
+        // The golem must also appear in the rendered token list.
+        assertEquals(listOf(Golem(Position(0, 0), Direction.SOUTH)), model.tokens)
     }
 
     @Test
