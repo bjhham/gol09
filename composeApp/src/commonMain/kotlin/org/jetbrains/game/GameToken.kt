@@ -270,7 +270,7 @@ data class Golem(
 
         // Arms: how tall they are relative to the body, and legs: how wide they are
         // relative to the body.
-        const val ARM_HEIGHT_RATIO = 0.70f
+        const val ARM_HEIGHT_RATIO = 0.85f
         const val LEG_WIDTH_RATIO = 0.30f
 
         // Eye sizing/position, as fractions of the head's width/height.
