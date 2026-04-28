@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.safeContentPadding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -54,6 +55,10 @@ private const val SIMULATION_TICK_MILLIS = 500L
 @Preview
 fun App() {
     MaterialTheme {
+        // The freshly-parsed initial game grid. `null` until the initial map has finished loading.
+        // This is used both as the starting state and as the target of the refresh button.
+        var initialGrid by remember { mutableStateOf<GameGrid?>(null) }
+
         // The current parsed game grid. `null` until the initial map has finished loading.
         var gameGrid by remember { mutableStateOf<GameGrid?>(null) }
 
@@ -62,7 +67,9 @@ fun App() {
 
         LaunchedEffect(Unit) {
             val bytes = Res.readBytes(INITIAL_MAP_PATH)
-            gameGrid = MapParser().parse(bytes.decodeToString())
+            val parsed = MapParser().parse(bytes.decodeToString())
+            initialGrid = parsed
+            gameGrid = parsed
         }
 
         // Drive the simulation while running: tick every SIMULATION_TICK_MILLIS,
@@ -133,8 +140,8 @@ fun App() {
                 }
             }
 
-            // Status bar: empty for now, with a play button on the right
-            // for starting/stopping the simulation.
+            // Status bar: empty for now, with refresh and play buttons on the
+            // right for resetting and starting/stopping the simulation.
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -143,6 +150,23 @@ fun App() {
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.End,
             ) {
+                // Refresh resets the grid back to the freshly-loaded initial state
+                // and stops the simulation. Disabled while the grid already matches
+                // that initial state (i.e. nothing to refresh).
+                val initial = initialGrid
+                val isInitialState = initial != null && gameGrid == initial
+                IconButton(
+                    onClick = {
+                        isRunning = false
+                        gameGrid = initial
+                    },
+                    enabled = !isInitialState,
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.Refresh,
+                        contentDescription = "Refresh",
+                    )
+                }
                 IconButton(onClick = { isRunning = !isRunning }) {
                     if (isRunning) {
                         Icon(
