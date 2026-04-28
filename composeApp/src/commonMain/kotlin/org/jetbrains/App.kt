@@ -40,6 +40,7 @@ import kscript.KScriptParser
 import kscript.KScriptRunner
 import kscript.KUnit
 import kscript.bridgeFunction
+import kscript.bridgeFunctionVoid
 import kscript.emptyProcessState
 import kscript.parseFile
 import org.jetbrains.game.GameGrid
@@ -110,9 +111,8 @@ fun App() {
         // immediately, stopping the loop.
         LaunchedEffect(isRunning) {
             if (!isRunning) return@LaunchedEffect
-            val moveFn = bridgeFunction("move") {
+            val moveFn = bridgeFunctionVoid("move") {
                 gameGrid = gameGrid?.moveGolem()
-                KUnit
             }
             val state = emptyProcessState().apply {
                 this[KIdentifier("move")] = moveFn
