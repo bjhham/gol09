@@ -33,8 +33,11 @@ import androidx.compose.ui.unit.dp
 import gol09.composeapp.generated.resources.Res
 import kotlin.math.min
 import kotlinx.coroutines.delay
+import kscript.CompilationException
+import kscript.KFile
 import kscript.KScriptParser
 import kscript.KScriptRunner
+import kscript.parseFile
 import org.jetbrains.game.GameGrid
 import org.jetbrains.game.MapParser
 
@@ -183,10 +186,24 @@ fun App() {
             }
 
             // Lower half: text area for the user's code input.
+            //
+            // The text is re-parsed on every change and the resulting `KFile` is
+            // stored in state for the script runner to consume later. Parsing
+            // failures are expected while the user is mid-edit, so we swallow
+            // `CompilationException` and simply leave the previous `KFile` in
+            // place (or `null` if nothing has parsed successfully yet).
             var code by remember { mutableStateOf("") }
+            var kFile by remember { mutableStateOf<KFile?>(null) }
             OutlinedTextField(
                 value = code,
-                onValueChange = { code = it },
+                onValueChange = { newCode ->
+                    code = newCode
+                    kFile = try {
+                        scriptParser.parseFile(newCode)
+                    } catch (_: CompilationException) {
+                        null
+                    }
+                },
                 modifier = Modifier
                     .fillMaxWidth()
                     .weight(1f)
