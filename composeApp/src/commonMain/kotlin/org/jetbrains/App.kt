@@ -200,7 +200,7 @@ fun App() {
                     code = newCode
                     kFile = try {
                         scriptParser.parseFile(newCode)
-                    } catch (_: CompilationException) {
+                    } catch (_: Exception) {
                         null
                     }
                 },
