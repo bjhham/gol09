@@ -18,7 +18,19 @@ enum class Direction {
     NORTH,
     EAST,
     SOUTH,
-    WEST,
+    WEST;
+
+    /**
+     * The unit step on the grid corresponding to moving one cell in this
+     * direction. Recall that `y` increases to the south.
+     */
+    val delta: Position
+        get() = when (this) {
+            NORTH -> Position(0, -1)
+            EAST -> Position(1, 0)
+            SOUTH -> Position(0, 1)
+            WEST -> Position(-1, 0)
+        }
 }
 
 /**
@@ -35,4 +47,26 @@ data class GameGrid(
 ) {
     val golem: Golem
         get() = tokens.filterIsInstance<Golem>().single()
+
+    /**
+     * Returns whether the cell at [position] is inside the grid bounds.
+     */
+    fun isInBounds(position: Position): Boolean =
+        position.x in 0 until width && position.y in 0 until height
+
+    /**
+     * Returns a new [GameGrid] with the golem advanced one cell in the
+     * direction it is facing. If that would move it off the grid, the
+     * current grid is returned unchanged.
+     */
+    fun moveGolem(): GameGrid {
+        val current = golem
+        val next = Position(
+            x = current.position.x + current.facing.delta.x,
+            y = current.position.y + current.facing.delta.y,
+        )
+        if (!isInBounds(next)) return this
+        val moved = current.copy(position = next)
+        return copy(tokens = tokens.map { if (it === current) moved else it })
+    }
 }

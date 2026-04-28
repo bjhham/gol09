@@ -27,6 +27,7 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import gol09.composeapp.generated.resources.Res
 import kotlin.math.min
+import kotlinx.coroutines.delay
 import kscript.KScriptParser
 import kscript.KScriptRunner
 import org.jetbrains.game.GameGrid
@@ -40,6 +41,11 @@ val scriptRunner by lazy { KScriptRunner() }
  */
 private const val INITIAL_MAP_PATH = "files/maps/level0"
 
+/**
+ * Delay between simulation ticks, in milliseconds, while the simulation is running.
+ */
+private const val SIMULATION_TICK_MILLIS = 500L
+
 @Composable
 @Preview
 fun App() {
@@ -47,9 +53,23 @@ fun App() {
         // The current parsed game grid. `null` until the initial map has finished loading.
         var gameGrid by remember { mutableStateOf<GameGrid?>(null) }
 
+        // Whether the simulation is currently running. Toggled by the play/pause button.
+        var isRunning by remember { mutableStateOf(false) }
+
         LaunchedEffect(Unit) {
             val bytes = Res.readBytes(INITIAL_MAP_PATH)
             gameGrid = MapParser().parse(bytes.decodeToString())
+        }
+
+        // Drive the simulation while running: tick every SIMULATION_TICK_MILLIS,
+        // moving the golem one cell in its facing direction. Pausing cancels this
+        // effect immediately, stopping the loop.
+        LaunchedEffect(isRunning) {
+            if (!isRunning) return@LaunchedEffect
+            while (true) {
+                delay(SIMULATION_TICK_MILLIS)
+                gameGrid = gameGrid?.moveGolem()
+            }
         }
 
         Column(
@@ -119,8 +139,8 @@ fun App() {
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.End,
             ) {
-                IconButton(onClick = { /* TODO: start/stop simulation */ }) {
-                    Text("▶")
+                IconButton(onClick = { isRunning = !isRunning }) {
+                    Text(if (isRunning) "⏸" else "▶")
                 }
             }
 
