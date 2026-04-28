@@ -3,7 +3,7 @@ package org.jetbrains.game
 /**
  * The size (width and height) of the game grid.
  */
-const val GRID_SIZE: Int = 24
+const val GRID_SIZE: Int = 12
 
 /**
  * A position on the game grid. The origin (0, 0) is the top-left corner;
