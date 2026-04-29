@@ -6,6 +6,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import kotlin.math.PI
+import kotlin.math.sin
 
 /**
  * Something that occupies a cell on the [GameGrid] and knows how to paint
@@ -44,17 +46,37 @@ data class Golem(
 ) : GameToken {
 
     override fun paint(scope: DrawScope, cellOrigin: Offset, cellSize: Float) {
+        paint(scope, cellOrigin, cellSize, walkPhase = 0f)
+    }
+
+    /**
+     * Paints the golem with an optional walking animation applied.
+     *
+     * [walkPhase] is the progress through a single walking cycle, in the
+     * range `[0f, 1f]`. A value of `0f` (or any whole number) renders the
+     * golem in its idle pose, identical to the base [paint] implementation.
+     * As [walkPhase] advances through a cycle the figure bobs up and down
+     * once and its legs alternate in a simple walking motion, providing
+     * visual feedback while the simulation is moving the golem between
+     * cells.
+     */
+    fun paint(scope: DrawScope, cellOrigin: Offset, cellSize: Float, walkPhase: Float) {
         // Reserve a small margin around the figure so adjacent tokens stay visually distinct.
         val margin = cellSize * MARGIN_RATIO
         val extent = cellSize - 2f * margin
         val left = cellOrigin.x + margin
-        val top = cellOrigin.y + margin
+        // Apply a vertical bob: the figure rises smoothly to a peak at the
+        // middle of the cycle and returns to its resting height by the end.
+        // A negative offset shifts the figure up the canvas because `y`
+        // increases downwards.
+        val bob = -extent * BOB_AMPLITUDE_RATIO * sin(((walkPhase % 1f) * PI).toFloat())
+        val top = cellOrigin.y + margin + bob
 
         when (facing) {
-            Direction.SOUTH -> paintFront(scope, left, top, extent)
-            Direction.NORTH -> paintBack(scope, left, top, extent)
-            Direction.EAST -> paintSide(scope, left, top, extent, mirrored = false)
-            Direction.WEST -> paintSide(scope, left, top, extent, mirrored = true)
+            Direction.SOUTH -> paintFront(scope, left, top, extent, walkPhase)
+            Direction.NORTH -> paintBack(scope, left, top, extent, walkPhase)
+            Direction.EAST -> paintSide(scope, left, top, extent, mirrored = false, walkPhase = walkPhase)
+            Direction.WEST -> paintSide(scope, left, top, extent, mirrored = true, walkPhase = walkPhase)
         }
     }
 
@@ -62,12 +84,12 @@ data class Golem(
      * Paints the front view: head with two small red square eyes, wide body
      * with arms on both sides, and two legs.
      */
-    private fun paintFront(scope: DrawScope, left: Float, top: Float, extent: Float) {
+    private fun paintFront(scope: DrawScope, left: Float, top: Float, extent: Float, walkPhase: Float) {
         val layout = bodyLayout(left, top, extent)
         drawHead(scope, layout)
         drawBody(scope, layout)
         drawSideArms(scope, layout)
-        drawLegs(scope, layout, separated = true)
+        drawLegs(scope, layout, separated = true, walkPhase = walkPhase)
 
         // Eyes: two small red squares on the head, distinguishing front from back.
         val eyeSize = layout.headWidth * EYE_SIZE_RATIO
@@ -91,12 +113,12 @@ data class Golem(
      * Paints the back view: identical silhouette to the front, but with no
      * eyes so that orientation is visually unambiguous.
      */
-    private fun paintBack(scope: DrawScope, left: Float, top: Float, extent: Float) {
+    private fun paintBack(scope: DrawScope, left: Float, top: Float, extent: Float, walkPhase: Float) {
         val layout = bodyLayout(left, top, extent)
         drawHead(scope, layout)
         drawBody(scope, layout)
         drawSideArms(scope, layout)
-        drawLegs(scope, layout, separated = true)
+        drawLegs(scope, layout, separated = true, walkPhase = walkPhase)
     }
 
     /**
@@ -115,11 +137,12 @@ data class Golem(
         top: Float,
         extent: Float,
         mirrored: Boolean,
+        walkPhase: Float,
     ) {
         val layout = bodyLayout(left, top, extent)
         drawHead(scope, layout)
         drawBody(scope, layout)
-        drawLegs(scope, layout, separated = false)
+        drawLegs(scope, layout, separated = false, walkPhase = walkPhase)
 
         // A single forward-projecting arm. In un-mirrored (east-facing) form it
         // points to the right of the body; mirroring flips it to the left.
@@ -209,9 +232,19 @@ data class Golem(
      * Draws the legs underneath the body. In [separated] mode the legs are drawn
      * side-by-side (front/back view); otherwise they are stacked at the centre
      * (side view, where one leg is hidden behind the other).
+     *
+     * [walkPhase] drives a simple walking animation: when non-zero, the legs
+     * shorten and lengthen alternately to suggest stepping. In the side
+     * (un-separated) view the single visible leg also swings forward and
+     * back along the figure's facing direction.
      */
-    private fun drawLegs(scope: DrawScope, layout: BodyLayout, separated: Boolean) {
+    private fun drawLegs(scope: DrawScope, layout: BodyLayout, separated: Boolean, walkPhase: Float) {
         val legWidth = layout.bodyWidth * LEG_WIDTH_RATIO
+        // One full sine cycle per cell: positive lobe lifts the left leg,
+        // negative lobe lifts the right leg.
+        val swing = sin(((walkPhase % 1f) * 2f * PI).toFloat())
+        val leftLift = layout.legsHeight * LEG_LIFT_RATIO * maxOf(swing, 0f)
+        val rightLift = layout.legsHeight * LEG_LIFT_RATIO * maxOf(-swing, 0f)
         if (separated) {
             val legGap = layout.bodyWidth - 2f * legWidth
             val leftLegLeft = layout.bodyLeft + (layout.bodyWidth - 2f * legWidth - legGap) / 2f
@@ -219,19 +252,39 @@ data class Golem(
             scope.drawRect(
                 color = LIMB_COLOR,
                 topLeft = Offset(leftLegLeft, layout.legsTop),
-                size = Size(legWidth, layout.legsHeight),
+                size = Size(legWidth, layout.legsHeight - leftLift),
             )
             scope.drawRect(
                 color = LIMB_COLOR,
                 topLeft = Offset(rightLegLeft, layout.legsTop),
-                size = Size(legWidth, layout.legsHeight),
+                size = Size(legWidth, layout.legsHeight - rightLift),
             )
         } else {
-            val legLeft = layout.bodyLeft + (layout.bodyWidth - legWidth) / 2f
+            // Side view: two legs are drawn, one in front of the other.
+            // While idle (`swing == 0`) they overlap exactly so the figure
+            // still reads as a profile silhouette. While walking, the two
+            // legs swing in opposite phase: one forward and lifted while
+            // the other is back and planted, then they trade roles. The
+            // back leg is drawn first so the front leg overlaps it, which
+            // preserves the side-on impression of one leg passing in front
+            // of the other.
+            val centerX = layout.bodyLeft + (layout.bodyWidth - legWidth) / 2f
+            val swingShift = legWidth * LEG_SWING_RATIO * swing
+            // The "front" leg in the figure's facing direction swings
+            // synchronously with the head's bob; the "back" leg swings in
+            // anti-phase. The lift uses the same lobed pattern as the
+            // separated case so each leg only lifts on its own swing.
+            val frontLift = layout.legsHeight * LEG_LIFT_RATIO * maxOf(swing, 0f)
+            val backLift = layout.legsHeight * LEG_LIFT_RATIO * maxOf(-swing, 0f)
             scope.drawRect(
                 color = LIMB_COLOR,
-                topLeft = Offset(legLeft, layout.legsTop),
-                size = Size(legWidth, layout.legsHeight),
+                topLeft = Offset(centerX - swingShift, layout.legsTop),
+                size = Size(legWidth, layout.legsHeight - backLift),
+            )
+            scope.drawRect(
+                color = LIMB_COLOR,
+                topLeft = Offset(centerX + swingShift, layout.legsTop),
+                size = Size(legWidth, layout.legsHeight - frontLift),
             )
         }
     }
@@ -279,6 +332,87 @@ data class Golem(
         const val EYE_SIZE_RATIO = 0.30f
         const val EYE_INSET_RATIO = 0.10f
         const val EYE_VERTICAL_RATIO = 0.40f
+
+        // How high the figure bobs at the peak of a walking cycle, as a
+        // fraction of the figure's extent.
+        const val BOB_AMPLITUDE_RATIO = 0.06f
+
+        // How much each leg shortens at the peak of its lift, as a fraction
+        // of the legs' resting height.
+        const val LEG_LIFT_RATIO = 0.45f
+
+        // How far the side-view leg swings forward/back from centre, as a
+        // fraction of the leg's width.
+        const val LEG_SWING_RATIO = 0.9f
+    }
+}
+
+/**
+ * A wall segment occupying a contiguous range of cells along either a row
+ * or a column. Walls are immovable obstacles.
+ *
+ * The wall spans every cell from [position] (inclusive) to [end] (inclusive).
+ * Exactly one of the dimensions varies between [position] and [end]; the
+ * other is the "static" dimension and must be equal in both endpoints.
+ *
+ * Rendered as a thick line drawn at the leading edge of the static
+ * dimension (the top edge for a horizontal wall, the left edge for a
+ * vertical wall) and traced along the full length of the ranged dimension.
+ */
+data class Wall(
+    override val position: Position,
+    val end: Position,
+) : GameToken {
+
+    init {
+        require(position.x == end.x || position.y == end.y) {
+            "Wall must be axis-aligned: $position to $end"
+        }
+        require(position.x <= end.x && position.y <= end.y) {
+            "Wall start must be the lesser endpoint: $position to $end"
+        }
+    }
+
+    /**
+     * Every cell covered by this wall, including both endpoints.
+     */
+    val cells: List<Position>
+        get() = if (position.y == end.y) {
+            (position.x..end.x).map { Position(it, position.y) }
+        } else {
+            (position.y..end.y).map { Position(position.x, it) }
+        }
+
+    override fun paint(scope: DrawScope, cellOrigin: Offset, cellSize: Float) {
+        val thickness = cellSize * THICKNESS_RATIO
+        if (position.y == end.y) {
+            // Horizontal wall: thick line along the top edge of the row,
+            // running from the start cell's left edge to the end cell's
+            // right edge.
+            val length = (end.x - position.x + 1) * cellSize
+            scope.drawRect(
+                color = WALL_COLOR,
+                topLeft = Offset(cellOrigin.x, cellOrigin.y - thickness / 2f),
+                size = Size(length, thickness),
+            )
+        } else {
+            // Vertical wall: thick line along the left edge of the column,
+            // running from the start cell's top edge to the end cell's
+            // bottom edge.
+            val length = (end.y - position.y + 1) * cellSize
+            scope.drawRect(
+                color = WALL_COLOR,
+                topLeft = Offset(cellOrigin.x - thickness / 2f, cellOrigin.y),
+                size = Size(thickness, length),
+            )
+        }
+    }
+
+    private companion object {
+        val WALL_COLOR = Color(0xFF424242)
+
+        // Thickness of the wall stroke, as a fraction of the cell size.
+        const val THICKNESS_RATIO = 0.18f
     }
 }
 
@@ -306,13 +440,13 @@ data class Cheese(
         // corner down to the bottom-right corner. This gives the iconic
         // cartoon "slice of cheese" silhouette.
         val tip = Offset(left, top)
-        val backTop = Offset(left + extent, top)
-        val backBottom = Offset(left + extent, top + extent)
+        val bottomLeft = Offset(left, top + extent)
+        val bottomRight = Offset(left + extent, top + extent)
 
         val wedge = Path().apply {
             moveTo(tip.x, tip.y)
-            lineTo(backTop.x, backTop.y)
-            lineTo(backBottom.x, backBottom.y)
+            lineTo(bottomLeft.x, bottomLeft.y)
+            lineTo(bottomRight.x, bottomRight.y)
             close()
         }
         scope.drawPath(path = wedge, color = CHEESE_COLOR)
@@ -353,9 +487,10 @@ data class Cheese(
         // the half of the cell where `y <= x`, so each centre satisfies
         // that constraint with enough slack for the hole's radius.
         val HOLE_OFFSETS = listOf(
-            0.50f to 0.30f,
-            0.78f to 0.45f,
-            0.82f to 0.72f,
+            0.12f to 0.30f,
+            0.28f to 0.54f,
+            0.48f to 0.75f,
+            0.14f to 0.82f,
         )
     }
 }

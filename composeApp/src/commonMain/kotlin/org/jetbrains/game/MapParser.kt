@@ -13,6 +13,12 @@ package org.jetbrains.game
  * Supported object references:
  *  - `START` — the cell where the golem starts. The golem initially faces [Direction.SOUTH].
  *  - `CHEESE` — a cheese pickup. Reaching this cell completes the level.
+ *  - `WALL` — an axis-aligned wall segment spanning a range of cells. One
+ *    of the coordinates is given as a range `A-B` (with `A <= B`); the
+ *    other is a single integer. For example, `WALL 2,2-9` is a vertical
+ *    wall at column `2` running from row `2` to row `9` inclusive, and
+ *    `WALL 0-5,7` is a horizontal wall at row `7` running from column `0`
+ *    to column `5` inclusive.
  *
  * Lines that are blank or that begin with `#` are ignored.
  */
@@ -26,27 +32,42 @@ class MapParser {
     fun parse(text: String): GameGrid {
         var start: Position? = null
         val cheeses = mutableListOf<Cheese>()
+        val walls = mutableListOf<Wall>()
 
         text.lineSequence().forEachIndexed { index, rawLine ->
             val line = rawLine.trim()
             if (line.isEmpty() || line.startsWith("#")) return@forEachIndexed
 
-            val entry = parseLine(line, lineNumber = index + 1)
-            when (entry.ref) {
+            val lineNumber = index + 1
+            val parts = line.split(Regex("\\s+"))
+            if (parts.size != 2) {
+                throw MapParseException(
+                    "Expected '<REF> <COORDS>' on line $lineNumber, got: '$line'",
+                )
+            }
+            val ref = parts[0]
+            val coordsText = parts[1]
+
+            when (ref) {
                 "START" -> {
                     if (start != null) {
                         throw MapParseException(
-                            "Duplicate START entry on line ${index + 1}",
+                            "Duplicate START entry on line $lineNumber",
                         )
                     }
-                    start = entry.position
+                    val position = parsePosition(coordsText, lineNumber)
+                    start = position
                 }
                 "CHEESE" -> {
-                    validatePosition(entry.position, lineNumber = index + 1)
-                    cheeses += Cheese(position = entry.position)
+                    val position = parsePosition(coordsText, lineNumber)
+                    validatePosition(position, lineNumber = lineNumber)
+                    cheeses += Cheese(position = position)
+                }
+                "WALL" -> {
+                    walls += parseWall(coordsText, lineNumber)
                 }
                 else -> throw MapParseException(
-                    "Unknown object reference '${entry.ref}' on line ${index + 1}",
+                    "Unknown object reference '$ref' on line $lineNumber",
                 )
             }
         }
@@ -57,29 +78,81 @@ class MapParser {
         validatePosition(startPos)
 
         return GameGrid(
-            tokens = listOf(Golem(position = startPos, facing = Direction.SOUTH)) + cheeses,
+            tokens = listOf(Golem(position = startPos, facing = Direction.SOUTH)) +
+                walls + cheeses,
         )
     }
 
-    private fun parseLine(line: String, lineNumber: Int): Entry {
-        val parts = line.split(Regex("\\s+"))
-        if (parts.size != 2) {
-            throw MapParseException(
-                "Expected '<REF> <X>,<Y>' on line $lineNumber, got: '$line'",
-            )
-        }
-        val ref = parts[0]
-        val coords = parts[1].split(",")
+    private fun parsePosition(coordsText: String, lineNumber: Int): Position {
+        val coords = coordsText.split(",")
         if (coords.size != 2) {
             throw MapParseException(
-                "Expected coordinates of the form 'X,Y' on line $lineNumber, got: '${parts[1]}'",
+                "Expected coordinates of the form 'X,Y' on line $lineNumber, got: '$coordsText'",
             )
         }
         val x = coords[0].toIntOrNull()
             ?: throw MapParseException("Invalid X coordinate on line $lineNumber: '${coords[0]}'")
         val y = coords[1].toIntOrNull()
             ?: throw MapParseException("Invalid Y coordinate on line $lineNumber: '${coords[1]}'")
-        return Entry(ref, Position(x, y))
+        return Position(x, y)
+    }
+
+    private fun parseWall(coordsText: String, lineNumber: Int): Wall {
+        val coords = coordsText.split(",")
+        if (coords.size != 2) {
+            throw MapParseException(
+                "Expected wall coordinates of the form 'X,Y' on line $lineNumber, got: '$coordsText'",
+            )
+        }
+        val xRange = parseAxis(coords[0], axis = "X", lineNumber = lineNumber)
+        val yRange = parseAxis(coords[1], axis = "Y", lineNumber = lineNumber)
+        if (xRange.first != xRange.second && yRange.first != yRange.second) {
+            throw MapParseException(
+                "Wall must be axis-aligned: only one of X or Y may be a range on line $lineNumber",
+            )
+        }
+        if (xRange.first == xRange.second && yRange.first == yRange.second) {
+            throw MapParseException(
+                "Wall must span more than one cell: one of X or Y must be a range on line $lineNumber",
+            )
+        }
+        val start = Position(xRange.first, yRange.first)
+        val end = Position(xRange.second, yRange.second)
+        validatePosition(start, lineNumber = lineNumber)
+        validatePosition(end, lineNumber = lineNumber)
+        return Wall(position = start, end = end)
+    }
+
+    private fun parseAxis(text: String, axis: String, lineNumber: Int): Pair<Int, Int> {
+        val parts = text.split("-")
+        return when (parts.size) {
+            1 -> {
+                val value = parts[0].toIntOrNull()
+                    ?: throw MapParseException(
+                        "Invalid $axis coordinate on line $lineNumber: '$text'",
+                    )
+                value to value
+            }
+            2 -> {
+                val from = parts[0].toIntOrNull()
+                    ?: throw MapParseException(
+                        "Invalid $axis range on line $lineNumber: '$text'",
+                    )
+                val to = parts[1].toIntOrNull()
+                    ?: throw MapParseException(
+                        "Invalid $axis range on line $lineNumber: '$text'",
+                    )
+                if (from > to) {
+                    throw MapParseException(
+                        "$axis range must be ascending on line $lineNumber: '$text'",
+                    )
+                }
+                from to to
+            }
+            else -> throw MapParseException(
+                "Invalid $axis coordinate on line $lineNumber: '$text'",
+            )
+        }
     }
 
     private fun validatePosition(position: Position, lineNumber: Int? = null) {
@@ -91,8 +164,6 @@ class MapParser {
             )
         }
     }
-
-    private data class Entry(val ref: String, val position: Position)
 }
 
 /**

@@ -104,4 +104,78 @@ class MapParserTest {
             parser.parse("START a,b\n")
         }
     }
+
+    @Test
+    fun parses_vertical_wall_with_y_range() {
+        // Mirrors the contents of the level1 map file.
+        val text = """
+            START 0,5
+            WALL 2,2-9
+            CHEESE 11,5
+        """.trimIndent()
+
+        val model = parser.parse(text)
+
+        assertEquals(
+            listOf(
+                Golem(Position(0, 5), Direction.SOUTH),
+                Wall(position = Position(2, 2), end = Position(2, 9)),
+                Cheese(Position(11, 5)),
+            ),
+            model.tokens,
+        )
+    }
+
+    @Test
+    fun parses_horizontal_wall_with_x_range() {
+        val text = """
+            START 0,0
+            WALL 0-5,7
+        """.trimIndent()
+
+        val model = parser.parse(text)
+
+        val wall = model.tokens.filterIsInstance<Wall>().single()
+        assertEquals(Position(0, 7), wall.position)
+        assertEquals(Position(5, 7), wall.end)
+        assertEquals(
+            listOf(
+                Position(0, 7),
+                Position(1, 7),
+                Position(2, 7),
+                Position(3, 7),
+                Position(4, 7),
+                Position(5, 7),
+            ),
+            wall.cells,
+        )
+    }
+
+    @Test
+    fun wall_with_two_ranges_throws() {
+        assertFailsWith<MapParseException> {
+            parser.parse("START 0,0\nWALL 1-3,2-4\n")
+        }
+    }
+
+    @Test
+    fun wall_with_no_range_throws() {
+        assertFailsWith<MapParseException> {
+            parser.parse("START 0,0\nWALL 2,3\n")
+        }
+    }
+
+    @Test
+    fun wall_descending_range_throws() {
+        assertFailsWith<MapParseException> {
+            parser.parse("START 0,0\nWALL 2,9-2\n")
+        }
+    }
+
+    @Test
+    fun wall_out_of_bounds_throws() {
+        assertFailsWith<MapParseException> {
+            parser.parse("START 0,0\nWALL 2,5-12\n")
+        }
+    }
 }
