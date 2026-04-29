@@ -119,10 +119,10 @@ class MapParserTest {
         assertEquals(
             listOf(
                 Golem(Position(0, 5), Direction.SOUTH),
-                Wall(position = Position(2, 2), end = Position(2, 9)),
                 Cheese(Position(11, 5)),
+                Wall(position = Position(2, 2), end = Position(2, 9)),
             ),
-            model.tokens,
+            model.elements,
         )
     }
 
@@ -135,7 +135,7 @@ class MapParserTest {
 
         val model = parser.parse(text)
 
-        val wall = model.tokens.filterIsInstance<Wall>().single()
+        val wall = model.walls.single()
         assertEquals(Position(0, 7), wall.position)
         assertEquals(Position(5, 7), wall.end)
         assertEquals(

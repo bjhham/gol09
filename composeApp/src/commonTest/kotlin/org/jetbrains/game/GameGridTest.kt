@@ -68,8 +68,8 @@ class GameGridTest {
         val grid = GameGrid(
             tokens = listOf(
                 Golem(Position(5, 5), Direction.SOUTH),
-                Wall(Position(3, 6), Position(7, 6)),
             ),
+            walls = listOf(Wall(Position(3, 6), Position(7, 6)))
         )
 
         assertSame(grid, grid.moveGolem())
@@ -88,11 +88,13 @@ class GameGridTest {
         for ((direction, wallCell) in cases) {
             val grid = GameGrid(
                 tokens = listOf(
-                    Golem(Position(5, 5), direction),
+                    Golem(Position(5, 5), direction)
+                ),
+                walls = listOf(
                     // A wall must span at least two cells, so extend it
                     // perpendicularly to the direction of travel.
                     Wall(wallCell, wallCell.copy(x = wallCell.x + 1)),
-                ),
+                )
             )
             assertSame(grid, grid.moveGolem(), "for $direction")
         }
@@ -103,9 +105,11 @@ class GameGridTest {
         val grid = GameGrid(
             tokens = listOf(
                 Golem(Position(5, 5), Direction.SOUTH),
+            ),
+            walls = listOf(
                 // Wall two cells ahead, not directly in front.
                 Wall(Position(3, 7), Position(7, 7)),
-            ),
+            )
         )
 
         val moved = grid.moveGolem()

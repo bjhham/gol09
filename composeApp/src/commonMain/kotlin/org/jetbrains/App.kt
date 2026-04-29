@@ -78,6 +78,7 @@ private val LEVEL_MAP_PATHS = listOf(
     "files/maps/level0",
     "files/maps/level1",
     "files/maps/level2",
+    "files/maps/level3",
 )
 
 /**
@@ -216,6 +217,17 @@ fun App() {
                 coroutineContext.ensureActive()
                 if (!isRunning) return@bridgeFunctionVoid
                 val grid = gameGrid ?: return@bridgeFunctionVoid
+                // If the golem is already standing on the cheese, the level
+                // is complete and we must not take another step. The
+                // `LaunchedEffect(levelComplete)` that flips `isRunning` to
+                // false runs on recomposition, so by the time the script
+                // requests the next instruction it can race ahead of that
+                // effect — without this guard the golem walks one cell past
+                // the cheese and the level-complete overlay flickers away.
+                if (grid.tokens.any { it is Cheese && it.position == grid.golem.position }) {
+                    isRunning = false
+                    return@bridgeFunctionVoid
+                }
                 val target = grid.moveGolem()
                 val from = grid.golem.position
                 val to = target.golem.position

@@ -44,7 +44,7 @@ data class GameGrid(
     val width: Int = GRID_SIZE,
     val height: Int = GRID_SIZE,
     val tokens: List<GameToken>,
-    val walls: List<Wall>,
+    val walls: List<Wall> = emptyList(),
 ) {
     val elements: List<GameDrawable> get() = tokens + walls
 
@@ -78,9 +78,7 @@ data class GameGrid(
      * Returns whether [position] is occupied by any [Wall] segment.
      */
     private fun isWall(position: Position): Boolean =
-        tokens.asSequence()
-            .filterIsInstance<Wall>()
-            .any { position in it.cells }
+        walls.any { position in it.cells }
 
     /**
      * Returns a new [GameGrid] with the golem rotated 90 degrees clockwise
