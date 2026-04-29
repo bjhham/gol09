@@ -409,7 +409,7 @@ data class Wall(
     }
 
     private companion object {
-        val WALL_COLOR = Color(0xFF424242)
+        val WALL_COLOR = Color(0xFF979797)
 
         // Thickness of the wall stroke, as a fraction of the cell size.
         const val THICKNESS_RATIO = 0.18f

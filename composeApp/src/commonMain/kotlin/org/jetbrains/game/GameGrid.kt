@@ -56,8 +56,8 @@ data class GameGrid(
 
     /**
      * Returns a new [GameGrid] with the golem advanced one cell in the
-     * direction it is facing. If that would move it off the grid, the
-     * current grid is returned unchanged.
+     * direction it is facing. If that would move it off the grid, or onto
+     * a cell occupied by a [Wall], the current grid is returned unchanged.
      */
     fun moveGolem(): GameGrid {
         val current = golem
@@ -66,9 +66,18 @@ data class GameGrid(
             y = current.position.y + current.facing.delta.y,
         )
         if (!isInBounds(next)) return this
+        if (isWall(next)) return this
         val moved = current.copy(position = next)
         return copy(tokens = tokens.map { if (it === current) moved else it })
     }
+
+    /**
+     * Returns whether [position] is occupied by any [Wall] segment.
+     */
+    private fun isWall(position: Position): Boolean =
+        tokens.asSequence()
+            .filterIsInstance<Wall>()
+            .any { position in it.cells }
 
     /**
      * Returns a new [GameGrid] with the golem rotated 90 degrees clockwise

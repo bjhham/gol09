@@ -34,6 +34,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import gol09.composeapp.generated.resources.Res
+import kotlin.coroutines.cancellation.CancellationException
 import kotlin.coroutines.coroutineContext
 import kotlin.math.min
 import kotlinx.coroutines.NonCancellable
@@ -42,14 +43,17 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import kscript.CompilationException
 import kscript.KFile
+import kscript.KFunctionParameter
 import kscript.KIdentifier
 import kscript.KInt
 import kscript.KScriptParser
 import kscript.KScriptRunner
+import kscript.KString
 import kscript.KToken
 import kscript.KTokenData
 import kscript.KTokenType
 import kscript.KUnit
+import kscript.KVariableDeclaration
 import kscript.bridgeFunction
 import kscript.bridgeFunctionVoid
 import kscript.bridgeGetter
@@ -73,6 +77,7 @@ val scriptRunner by lazy { KScriptRunner() }
 private val LEVEL_MAP_PATHS = listOf(
     "files/maps/level0",
     "files/maps/level1",
+    "files/maps/level2",
 )
 
 /**
@@ -255,6 +260,33 @@ fun App() {
             val turnLeftFn = bridgeFunctionVoid("turnLeft") {
                 gameGrid = gameGrid?.turnGolemLeft()
             }
+            // `warp(name)` jumps to a level by base file name (e.g. `warp("level1")`
+            // loads `files/maps/level1`). Useful for testing as more stages are
+            // added: a script can position the golem on any level without having
+            // to advance through the preceding ones via the UI. Updating
+            // [levelIndex] triggers the keyed `LaunchedEffect(levelIndex)` above
+            // to reload the map and reset per-level state (including
+            // `isRunning`); we additionally throw [CancellationException] so the
+            // currently-executing script stops immediately rather than running
+            // one more instruction against the freshly-loaded grid.
+            val warpFn = bridgeFunctionVoid(
+                "warp",
+                parameters = listOf(KFunctionParameter("name", "String")),
+            ) {
+                val nameDecl = state[KIdentifier("name")] as KVariableDeclaration
+                val nameValue = nameDecl.initializer?.let { runner.execute(it, state) }
+                val name = (nameValue as? KString)?.value
+                    ?: error("warp(name): expected a String argument, got $nameValue")
+                val targetIndex = LEVEL_MAP_PATHS.indexOfFirst { it.substringAfterLast('/') == name }
+                if (targetIndex < 0) {
+                    error("warp(name): unknown level '$name'")
+                }
+                isRunning = false
+                if (levelIndex != targetIndex) {
+                    levelIndex = targetIndex
+                }
+                throw CancellationException("warp(\"$name\")")
+            }
             // Bridge getters expose the golem's current coordinates to the script.
             // They re-evaluate on every reference so the script always sees the
             // up-to-date position after `move()` calls.
@@ -271,6 +303,7 @@ fun App() {
                 this[KIdentifier("move")] = moveFn
                 this[KIdentifier("turnRight")] = turnRightFn
                 this[KIdentifier("turnLeft")] = turnLeftFn
+                this[KIdentifier("warp")] = warpFn
                 this[xGetter.name] = xGetter
                 this[yGetter.name] = yGetter
             }
