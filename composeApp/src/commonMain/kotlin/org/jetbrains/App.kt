@@ -26,7 +26,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.withFrameMillis
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -34,36 +33,16 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import gol09.composeapp.generated.resources.Res
-import kotlin.coroutines.cancellation.CancellationException
-import kotlin.coroutines.coroutineContext
 import kotlin.math.min
-import kotlinx.coroutines.NonCancellable
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
-import kotlinx.coroutines.withContext
 import kscript.CompilationException
-import kscript.KFile
-import kscript.KFunctionParameter
-import kscript.KIdentifier
-import kscript.KInt
 import kscript.KScriptParser
 import kscript.KScriptRunner
-import kscript.KString
-import kscript.KToken
-import kscript.KTokenData
-import kscript.KTokenType
-import kscript.KUnit
-import kscript.KVariableDeclaration
-import kscript.bridgeFunction
-import kscript.bridgeFunctionVoid
-import kscript.bridgeGetter
-import kscript.emptyProcessState
 import kscript.parseFile
 import org.jetbrains.game.Cheese
 import org.jetbrains.game.GameGrid
 import org.jetbrains.game.Golem
 import org.jetbrains.game.MapParser
-import org.jetbrains.game.Position
 
 val scriptParser by lazy { KScriptParser() }
 val scriptRunner by lazy { KScriptRunner() }
@@ -92,20 +71,6 @@ private const val SIMULATION_TICK_MILLIS = 500L
  * advances the golem one cell per call.
  */
 private const val INITIAL_CODE = "move()"
-
-/**
- * Snapshot of an in-progress walk animation. While `move()` is animating,
- * the golem's logical position in [GameGrid] is held at [from] until
- * [progress] reaches `1f`; the canvas renders its figure interpolated
- * between [from] and [to] in the meantime. Holding the model still until
- * the animation completes keeps the level-complete overlay (which keys on
- * the golem occupying a cheese cell) in sync with the visible motion.
- */
-private data class WalkAnimation(
-    val from: Position,
-    val to: Position,
-    val progress: Float,
-)
 
 @Composable
 @Preview
@@ -191,134 +156,30 @@ fun App() {
 
         // Drive the simulation while running: execute the user's parsed `KFile`
         // via `scriptRunner` in a loop. The script can call the bridged
-        // `move()` function, which advances the golem one cell in its facing
-        // direction over SIMULATION_TICK_MILLIS, animating the figure as it
-        // slides between cells (with a vertical bob and walking legs). It
-        // can also call `turnRight()` / `turnLeft()` to rotate the golem
-        // in place; turning updates state immediately and does not advance
-        // simulation time. Pausing cancels this effect, but the in-progress
-        // step (if any) is allowed to finish first so the golem doesn't stop
-        // halfway between cells; cancellation is then observed when the
-        // script runner asks for its next instruction.
+        // declarations supplied by [buildInitialState] (e.g. `move()`,
+        // `turnRight()`, `turnLeft()`, `warp(name)`, and the `x`/`y`
+        // getters), each backed by an action on [GameViewModel]. Pausing
+        // cancels this effect, but the in-progress `move()` step (if any) is
+        // allowed to finish first so the golem doesn't stop halfway between
+        // cells; cancellation is then observed when the script runner asks
+        // for its next instruction.
         LaunchedEffect(isRunning) {
             if (!isRunning) {
                 walkAnimation = null
                 return@LaunchedEffect
             }
-            val moveFn = bridgeFunctionVoid("move") {
-                // Bail out before doing any work if the simulation has been
-                // paused/reset since the last instruction. The move's slide
-                // runs inside a `withContext(NonCancellable)` block below,
-                // which intentionally swallows parent cancellation so the
-                // golem doesn't stop mid-cell; without this guard the
-                // script would happily start *another* move after the
-                // previous one completed even though the user had asked
-                // the simulation to stop.
-                coroutineContext.ensureActive()
-                if (!isRunning) return@bridgeFunctionVoid
-                val grid = gameGrid ?: return@bridgeFunctionVoid
-                // If the golem is already standing on the cheese, the level
-                // is complete and we must not take another step. The
-                // `LaunchedEffect(levelComplete)` that flips `isRunning` to
-                // false runs on recomposition, so by the time the script
-                // requests the next instruction it can race ahead of that
-                // effect — without this guard the golem walks one cell past
-                // the cheese and the level-complete overlay flickers away.
-                if (grid.tokens.any { it is Cheese && it.position == grid.golem.position }) {
-                    isRunning = false
-                    return@bridgeFunctionVoid
-                }
-                val target = grid.moveGolem()
-                val from = grid.golem.position
-                val to = target.golem.position
-                // Run the step inside a NonCancellable context so that pressing
-                // pause mid-step lets the current move animation complete before
-                // the simulation coroutine is cancelled. Cancellation will be
-                // observed at the next suspension point after this block (i.e.
-                // when the script runner asks for its next instruction). Refresh
-                // also flips `isRunning` to false, but additionally replaces
-                // `gameGrid`; we detect that below and skip committing the move
-                // so refresh isn't overwritten by an in-flight animation.
-                withContext(NonCancellable) {
-                    if (from == to) {
-                        // The move would have taken the golem off the grid, so the
-                        // model didn't change. Still pace the simulation so the
-                        // script doesn't spin, but skip the slide animation.
-                        delay(SIMULATION_TICK_MILLIS)
-                        return@withContext
-                    }
-                    walkAnimation = WalkAnimation(from = from, to = to, progress = 0f)
-                    val startMillis = withFrameMillis { it }
-                    while (true) {
-                        val nowMillis = withFrameMillis { it }
-                        val elapsed = nowMillis - startMillis
-                        val progress = (elapsed.toFloat() / SIMULATION_TICK_MILLIS).coerceIn(0f, 1f)
-                        walkAnimation = WalkAnimation(from = from, to = to, progress = progress)
-                        if (progress >= 1f) break
-                    }
-                    // Commit the move to the model and clear the animation so the
-                    // golem renders in its idle pose at its new cell. If the grid
-                    // has been replaced underneath us (e.g. by the refresh button),
-                    // honour that change instead of stomping on it.
-                    if (gameGrid === grid) {
-                        gameGrid = target
-                    }
-                    walkAnimation = null
-                }
-            }
-            val turnRightFn = bridgeFunctionVoid("turnRight") {
-                gameGrid = gameGrid?.turnGolemRight()
-            }
-            val turnLeftFn = bridgeFunctionVoid("turnLeft") {
-                gameGrid = gameGrid?.turnGolemLeft()
-            }
-            // `warp(name)` jumps to a level by base file name (e.g. `warp("level1")`
-            // loads `files/maps/level1`). Useful for testing as more stages are
-            // added: a script can position the golem on any level without having
-            // to advance through the preceding ones via the UI. Updating
-            // [levelIndex] triggers the keyed `LaunchedEffect(levelIndex)` above
-            // to reload the map and reset per-level state (including
-            // `isRunning`); we additionally throw [CancellationException] so the
-            // currently-executing script stops immediately rather than running
-            // one more instruction against the freshly-loaded grid.
-            val warpFn = bridgeFunctionVoid(
-                "warp",
-                parameters = listOf(KFunctionParameter("name", "String")),
-            ) {
-                val nameDecl = state[KIdentifier("name")] as KVariableDeclaration
-                val nameValue = nameDecl.initializer?.let { runner.execute(it, state) }
-                val name = (nameValue as? KString)?.value
-                    ?: error("warp(name): expected a String argument, got $nameValue")
-                val targetIndex = LEVEL_MAP_PATHS.indexOfFirst { it.substringAfterLast('/') == name }
-                if (targetIndex < 0) {
-                    error("warp(name): unknown level '$name'")
-                }
-                isRunning = false
-                if (levelIndex != targetIndex) {
-                    levelIndex = targetIndex
-                }
-                throw CancellationException("warp(\"$name\")")
-            }
-            // Bridge getters expose the golem's current coordinates to the script.
-            // They re-evaluate on every reference so the script always sees the
-            // up-to-date position after `move()` calls.
-            val intType = KIdentifier("Int")
-            val xGetter = bridgeGetter("x", intType) {
-                val value = gameGrid?.golem?.position?.x ?: 0
-                KInt(KToken(KTokenData.Text(KTokenType.INTEGER_LITERAL, value.toString())), value)
-            }
-            val yGetter = bridgeGetter("y", intType) {
-                val value = gameGrid?.golem?.position?.y ?: 0
-                KInt(KToken(KTokenData.Text(KTokenType.INTEGER_LITERAL, value.toString())), value)
-            }
-            val state = emptyProcessState().apply {
-                this[KIdentifier("move")] = moveFn
-                this[KIdentifier("turnRight")] = turnRightFn
-                this[KIdentifier("turnLeft")] = turnLeftFn
-                this[KIdentifier("warp")] = warpFn
-                this[xGetter.name] = xGetter
-                this[yGetter.name] = yGetter
-            }
+            val vm = GameViewModel(
+                getGameGrid = { gameGrid },
+                setGameGrid = { gameGrid = it },
+                isRunning = { isRunning },
+                setRunning = { isRunning = it },
+                getLevelIndex = { levelIndex },
+                setLevelIndex = { levelIndex = it },
+                setWalkAnimation = { walkAnimation = it },
+                levelMapPaths = LEVEL_MAP_PATHS,
+                tickMillis = SIMULATION_TICK_MILLIS,
+            )
+            val state = buildInitialState(vm)
             while (true) {
                 // The script runner only suspends inside bridged `move()`
                 // calls, and that suspension happens in a `NonCancellable`
