@@ -1,5 +1,6 @@
 package org.jetbrains
 
+import kscript.KBoolean
 import kscript.KClassDeclaration
 import kscript.KClassInstance
 import kscript.KClassKind
@@ -14,10 +15,13 @@ import kscript.KValOrVar
 import kscript.KValue
 import kscript.KVariableDeclaration
 import kscript.ProcessState
+import kscript.bridgeFunction
 import kscript.bridgeFunctionVoid
 import kscript.bridgeGetter
 import kscript.emptyProcessState
+import org.jetbrains.game.Direction
 import org.jetbrains.game.GameToken
+import org.jetbrains.game.Point
 
 /**
  * Build a [ProcessState] populated with the bridge declarations exposed
@@ -43,6 +47,7 @@ fun buildInitialState(
     state += bridgeFunctionVoid("move") { vm.move() }
     state += bridgeFunctionVoid("turnRight") { vm.turnRight() }
     state += bridgeFunctionVoid("turnLeft") { vm.turnLeft() }
+    state += bridgeFunction("blocked") { KBoolean(!vm.canMove()) }
     // `warp(name)` reads its `name` parameter out of the active
     // [ProcessState] (where the runner has bound the call's argument)
     // and forwards it to the view model. The view model owns the
@@ -60,8 +65,15 @@ fun buildInitialState(
     }
     // Bridge getters re-evaluate on every reference so the script
     // always sees the up-to-date golem position after `move()` calls.
-    state += bridgeGetter("x", INT_TYPE) { intValue(vm.golemX) }
-    state += bridgeGetter("y", INT_TYPE) { intValue(vm.golemY) }
+    state += bridgeGetter("x", INT_TYPE) { intValue(vm.golem?.x ?: 0) }
+    state += bridgeGetter("y", INT_TYPE) { intValue(vm.golem?.y ?: 0) }
+    state += bridgeGetter("facing", POINT_TYPE) {
+        positionValue(vm.golem?.facing?.vector ?: Direction.SOUTH.vector)
+    }
+    state += bridgeGetter("north", POINT_TYPE) { positionValue(Direction.NORTH.vector) }
+    state += bridgeGetter("east", POINT_TYPE) { positionValue(Direction.EAST.vector) }
+    state += bridgeGetter("south", POINT_TYPE) { positionValue(Direction.SOUTH.vector) }
+    state += bridgeGetter("west", POINT_TYPE) { positionValue(Direction.WEST.vector) }
 
     // Expose every renderable token on the grid as a script variable
     // named after [GameToken.name], whose value is a [Position] data
@@ -71,7 +83,7 @@ fun buildInitialState(
     // the current grid so the values stay fresh as the golem moves.
     for (token in vm.tokens) {
         val variableName = token.name
-        state += bridgeGetter(variableName, POSITION_TYPE) {
+        state += bridgeGetter(variableName, POINT_TYPE) {
             positionValue(vm, variableName)
         }
     }
@@ -80,7 +92,7 @@ fun buildInitialState(
 }
 
 private val INT_TYPE = KIdentifier("Int")
-private val POSITION_TYPE = KIdentifier("Position")
+private val POINT_TYPE = KIdentifier("Point")
 private val X_NAME = KIdentifier("x")
 private val Y_NAME = KIdentifier("y")
 
@@ -95,7 +107,7 @@ private val POSITION_DECL = KClassDeclaration(
     children = emptyList(),
     annotations = emptyList(),
     visibility = null,
-    name = POSITION_TYPE,
+    name = POINT_TYPE,
     kind = KClassKind.DATA,
     typeParameters = emptyList(),
     superTypes = emptyList(),
@@ -123,12 +135,16 @@ private fun intValue(value: Int): KInt =
 /**
  * Build a [Position] [KClassInstance] for the (current) token named
  * [tokenName] on [vm]'s grid. Re-evaluated on every reference so the
- * value reflects the live grid; if the token has been removed (e.g.
+ * value reflects the live grid; if the token has been removed (e.g.,
  * after a level switch) the previous coordinates are reported.
  */
 private fun positionValue(vm: GameViewModel, tokenName: String): KClassInstance {
     val token: GameToken? = vm.tokens.firstOrNull { it.name == tokenName }
     val position = token?.position
+    return positionValue(position)
+}
+
+private fun positionValue(position: Point?): KClassInstance {
     val properties = mutableMapOf<KIdentifier, KValue>(
         X_NAME to intValue(position?.x ?: 0),
         Y_NAME to intValue(position?.y ?: 0),

@@ -64,7 +64,7 @@ private val LEVEL_MAP_PATHS = listOf(
 /**
  * Delay between simulation ticks, in milliseconds, while the simulation is running.
  */
-private const val SIMULATION_TICK_MILLIS = 500L
+private const val SIMULATION_TICK_MILLIS = 200L
 
 /**
  * Maximum number of script-loop iterations to allow before the play loop

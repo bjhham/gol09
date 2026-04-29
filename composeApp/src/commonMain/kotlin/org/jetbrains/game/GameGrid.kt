@@ -9,7 +9,15 @@ const val GRID_SIZE: Int = 12
  * A position on the game grid. The origin (0, 0) is the top-left corner;
  * x increases to the east and y increases to the south.
  */
-data class Point(val x: Int, val y: Int)
+data class Point(val x: Int, val y: Int) {
+    operator fun plus(other: Point) = Point(x + other.x, y + other.y)
+    operator fun minus(other: Point) = Point(x - other.x, y - other.y)
+    operator fun contains(other: Point) = x == other.x && y == other.y
+    operator fun times(factor: Int) = Point(x * factor, y * factor)
+    operator fun div(factor: Int) = Point(x / factor, y / factor)
+    operator fun unaryMinus() = Point(-x, -y)
+    infix fun mod(other: Int) = (x % other + other) % other
+}
 
 /**
  * The four cardinal directions an entity can face on the grid.
@@ -52,15 +60,18 @@ data class GameGrid(
      */
     fun moveGolem(): GameGrid {
         val current = golem
-        val next = Point(
-            x = current.position.x + current.facing.vector.x,
-            y = current.position.y + current.facing.vector.y,
-        )
+        val next = current.position + current.facing.vector
         if (!isInBounds(next)) return this
         if (isWall(next)) return this
         val moved = current.copy(position = next)
         return copy(tokens = tokens.map { if (it === current) moved else it })
     }
+
+    /**
+     * Returns whether the golem can move one cell in the direction it is facing.
+     */
+    fun canMoveGolem(): Boolean =
+        (golem.position + golem.facing.vector).let { isInBounds(it) && !isWall(it) }
 
     /**
      * Returns whether [position] is occupied by any [Wall] segment.

@@ -17,6 +17,9 @@ sealed interface GameDrawable {
      */
     val position: Point
 
+    val x get() = position.x
+    val y get() = position.y
+
     /**
      * Paint this token onto [scope] inside the cell rectangle whose
      * top-left corner is [cellOrigin] and whose width/height are [cellSize].

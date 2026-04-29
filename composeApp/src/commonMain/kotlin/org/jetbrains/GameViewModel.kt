@@ -10,6 +10,7 @@ import kotlinx.coroutines.withContext
 import org.jetbrains.game.Cheese
 import org.jetbrains.game.GameGrid
 import org.jetbrains.game.GameToken
+import org.jetbrains.game.Golem
 import org.jetbrains.game.Point
 
 /**
@@ -51,12 +52,10 @@ class GameViewModel(
     private val levelMapPaths: List<String>,
     private val tickMillis: Long,
 ) {
-
-    /** The golem's current `x` coordinate, or `0` if no level is loaded. */
-    val golemX: Int get() = getGameGrid()?.golem?.position?.x ?: 0
-
-    /** The golem's current `y` coordinate, or `0` if no level is loaded. */
-    val golemY: Int get() = getGameGrid()?.golem?.position?.y ?: 0
+    /**
+     * Get the current state of the golem
+     */
+    val golem: Golem? get() = getGameGrid()?.golem
 
     /**
      * The renderable tokens currently on the grid, or an empty list if no
@@ -64,6 +63,8 @@ class GameViewModel(
      * named variable whose value carries its grid position.
      */
     val tokens: List<GameToken> get() = getGameGrid()?.tokens ?: emptyList()
+
+    fun canMove(): Boolean = getGameGrid()?.canMoveGolem() ?: false
 
     /**
      * Advances the golem one cell in its facing direction over
