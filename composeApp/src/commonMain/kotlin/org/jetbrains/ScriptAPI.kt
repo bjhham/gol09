@@ -27,10 +27,19 @@ import org.jetbrains.game.GameToken
  * change: add the corresponding action to [GameViewModel] and wire a
  * `bridgeFunctionVoid` / `bridgeGetter` for it below.
  *
+ * [loopLimit] is forwarded to [ProcessState.loopLimit] so the caller
+ * can bound pathological scripts (e.g. an empty program whose outer
+ * play loop would otherwise spin forever, or a `while (true) {}` body
+ * that never yields). `null` (the default) leaves the runner
+ * unbounded, matching the existing test suite.
+ *
  * The resulting state is ready to be passed to `KScriptRunner.execute`.
  */
-fun buildInitialState(vm: GameViewModel): ProcessState {
-    val state = emptyProcessState()
+fun buildInitialState(
+    vm: GameViewModel,
+    loopLimit: Int? = null,
+): ProcessState {
+    val state = emptyProcessState(loopLimit = loopLimit)
     state += bridgeFunctionVoid("move") { vm.move() }
     state += bridgeFunctionVoid("turnRight") { vm.turnRight() }
     state += bridgeFunctionVoid("turnLeft") { vm.turnLeft() }

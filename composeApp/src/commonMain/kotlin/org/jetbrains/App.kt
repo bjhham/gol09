@@ -38,6 +38,7 @@ import kotlinx.coroutines.ensureActive
 import kscript.CompilationException
 import kscript.KScriptParser
 import kscript.KScriptRunner
+import kscript.LoopLimitExceededException
 import kscript.parseFile
 import org.jetbrains.game.Cheese
 import org.jetbrains.game.GameGrid
@@ -64,6 +65,20 @@ private val LEVEL_MAP_PATHS = listOf(
  * Delay between simulation ticks, in milliseconds, while the simulation is running.
  */
 private const val SIMULATION_TICK_MILLIS = 500L
+
+/**
+ * Maximum number of script-loop iterations to allow before the play loop
+ * gives up and pauses the simulation. This bounds two failure modes that
+ * would otherwise freeze the UI:
+ *  - the user hits play with no `move()` (or other suspending) call in
+ *    the script, so the outer play loop in [App] spins as fast as the
+ *    CPU allows; and
+ *  - the user writes a runaway `while (true) { ... }` whose body never
+ *    yields control back to the host.
+ * The value is intentionally generous so that legitimate, slow-moving
+ * scripts (paced by `move()`) don't trip it within a reasonable session.
+ */
+private const val SCRIPT_LOOP_LIMIT = 10_000
 
 /**
  * Source code that initially populates the editor. Provides a working program
@@ -179,18 +194,33 @@ fun App() {
                 levelMapPaths = LEVEL_MAP_PATHS,
                 tickMillis = SIMULATION_TICK_MILLIS,
             )
-            val state = buildInitialState(vm)
-            while (true) {
-                // The script runner only suspends inside bridged `move()`
-                // calls, and that suspension happens in a `NonCancellable`
-                // context — meaning it won't observe cancellation of this
-                // effect. We therefore re-check on each iteration so that
-                // toggling `isRunning` (via pause or refresh) actually
-                // stops the script between top-level executions.
-                coroutineContext.ensureActive()
-                if (!isRunning) break
-                val file = kFile ?: break
-                scriptRunner.execute(file, state)
+            val state = buildInitialState(vm, loopLimit = SCRIPT_LOOP_LIMIT)
+            try {
+                while (true) {
+                    // The script runner only suspends inside bridged `move()`
+                    // calls, and that suspension happens in a `NonCancellable`
+                    // context — meaning it won't observe cancellation of this
+                    // effect. We therefore re-check on each iteration so that
+                    // toggling `isRunning` (via pause or refresh) actually
+                    // stops the script between top-level executions.
+                    coroutineContext.ensureActive()
+                    if (!isRunning) break
+                    val file = kFile ?: break
+                    // Tick the shared loop counter for each top-level
+                    // execution iteration so a non-suspending script
+                    // (e.g. an empty program) trips the configured limit
+                    // and lands in the catch block below instead of
+                    // freezing the UI.
+                    state.recordLoopIteration()
+                    scriptRunner.execute(file, state)
+                }
+            } catch (_: LoopLimitExceededException) {
+                // The script blew through its iteration budget — likely an
+                // empty program or a `while (true) {}` that never yields.
+                // Pause the simulation so the user can edit and try again
+                // rather than wedging the play loop.
+                isRunning = false
+                walkAnimation = null
             }
         }
 
