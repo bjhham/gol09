@@ -8,8 +8,10 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeContentPadding
+import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Pause
@@ -30,7 +32,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.PointerEventType
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import kotlin.coroutines.cancellation.CancellationException
@@ -41,6 +49,7 @@ import kscript.KScriptParser
 import kscript.KScriptRunner
 import kscript.parseFile
 import org.jetbrains.game.Golem
+import org.jetbrains.game.Point
 
 val scriptParser by lazy { KScriptParser() }
 val scriptRunner by lazy { KScriptRunner() }
@@ -188,14 +197,34 @@ fun App() {
                 .safeContentPadding()
                 .fillMaxSize(),
         ) {
-            // Upper half: canvas for drawing the game state.
+            // Upper half: canvas for drawing the game state. Wrapped in a
+            // Box so we can overlay a hover tooltip showing the coordinates
+            // and any token names underneath the pointer.
             val currentGrid = vm.gameGrid
             val walkAnimation = vm.walkAnimation
-            Canvas(
+            var canvasSize by remember { mutableStateOf(IntSize.Zero) }
+            var pointerOffset by remember { mutableStateOf<Offset?>(null) }
+            val density = LocalDensity.current
+            Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .weight(1f)
-                    .background(Color.Black),
+                    .background(Color.Black)
+                    .onSizeChanged { canvasSize = it }
+                    .pointerInput(Unit) {
+                        awaitPointerEventScope {
+                            while (true) {
+                                val event = awaitPointerEvent()
+                                pointerOffset = when (event.type) {
+                                    PointerEventType.Exit -> null
+                                    else -> event.changes.firstOrNull()?.position
+                                }
+                            }
+                        }
+                    },
+            ) {
+            Canvas(
+                modifier = Modifier.fillMaxSize(),
             ) {
                 currentGrid?.let { grid ->
                     // Use square cells and centre the grid inside the canvas.
@@ -256,6 +285,78 @@ fun App() {
                         }
                     }
                 }
+            }
+
+            // Hover tooltip: when the pointer is over a cell inside the
+            // grid, draw a small label just below that cell with the cell
+            // coordinates and the names of any tokens occupying it. The
+            // label is positioned via `Modifier.offset` in dp, so we
+            // convert from canvas pixels using the current density.
+            val pointer = pointerOffset
+            if (currentGrid != null && pointer != null && canvasSize != IntSize.Zero) {
+                val widthPx = canvasSize.width.toFloat()
+                val heightPx = canvasSize.height.toFloat()
+                val cellSize = min(
+                    widthPx / currentGrid.width,
+                    heightPx / currentGrid.height,
+                )
+                if (cellSize > 0f) {
+                    val gridWidth = cellSize * currentGrid.width
+                    val gridHeight = cellSize * currentGrid.height
+                    val originX = (widthPx - gridWidth) / 2f
+                    val originY = (heightPx - gridHeight) / 2f
+                    val cellX = ((pointer.x - originX) / cellSize).toInt()
+                    val cellY = ((pointer.y - originY) / cellSize).toInt()
+                    if (cellX in 0 until currentGrid.width &&
+                        cellY in 0 until currentGrid.height &&
+                        pointer.x in originX..(originX + gridWidth) &&
+                        pointer.y in originY..(originY + gridHeight)
+                    ) {
+                        val cell = Point(cellX, cellY)
+                        val names = currentGrid.tokens
+                            .filter { it.position == cell }
+                            .map { it.name }
+                        val label = buildString {
+                            append('(').append(cellX).append(", ").append(cellY).append(')')
+                            if (names.isNotEmpty()) {
+                                append('\n')
+                                append(names.joinToString(separator = ", "))
+                            }
+                        }
+                        // Place the tooltip just below the hovered cell,
+                        // horizontally centred on the cell. We anchor an
+                        // outer zero-size box at the cell's centre-x and
+                        // let the tooltip size to its content using
+                        // `wrapContentSize(unbounded = true)`, so longer
+                        // token names (e.g. "cheese") aren't wrapped just
+                        // because they exceed the cell's width.
+                        val labelXDp = with(density) {
+                            (originX + (cellX + 0.5f) * cellSize).toDp()
+                        }
+                        val labelYDp = with(density) { (originY + (cellY + 1) * cellSize).toDp() }
+                        Box(
+                            modifier = Modifier
+                                .offset(x = labelXDp, y = labelYDp)
+                                .wrapContentSize(align = Alignment.TopCenter, unbounded = true),
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .background(Color.Black.copy(alpha = 0.7f))
+                                    .padding(horizontal = 4.dp, vertical = 2.dp),
+                            ) {
+                                Text(
+                                    text = label,
+                                    color = Color.White,
+                                    style = MaterialTheme.typography.labelSmall.copy(
+                                        fontSize = MaterialTheme.typography.labelSmall.fontSize * 0.85f,
+                                    ),
+                                    textAlign = TextAlign.Center,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
             }
 
             // Status bar: empty for now, with refresh and play buttons on the
