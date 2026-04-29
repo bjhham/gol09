@@ -372,36 +372,38 @@ data class Golem(
  * vertical wall) and traced along the full length of the ranged dimension.
  */
 data class Wall(
-    override val position: Point,
+    val start: Point,
     val end: Point,
 ) : GameDrawable {
+    override val position: Point get() = start
 
     init {
-        require(position.x == end.x || position.y == end.y) {
-            "Wall must be axis-aligned: $position to $end"
+        require(start.x == end.x || start.y == end.y) {
+            "Wall must be axis-aligned: $start to $end"
         }
-        require(position.x <= end.x && position.y <= end.y) {
-            "Wall start must be the lesser endpoint: $position to $end"
+        require(start.x <= end.x && start.y <= end.y) {
+            "Wall start must be the lesser endpoint: $start to $end"
         }
     }
 
     /**
-     * Every cell covered by this wall, including both endpoints.
+     * Since we're dealing with integers, we must double the scale and subtract 1
+     * to find the line between two cells in the grid.  This is needed for checking
+     * intersections.
      */
-    val cells: List<Point>
-        get() = if (position.y == end.y) {
-            (position.x..end.x).map { Point(it, position.y) }
-        } else {
-            (position.y..end.y).map { Point(position.x, it) }
-        }
+    fun doubleScaledLine(): Line =
+        if (start.x == end.x)
+            start * 2 - Point(1, 1) to end * 2 - Point(1, -1)
+        else
+            start * 2 - Point(1, 1) to end * 2 - Point(-1, 1)
 
     override fun paint(scope: DrawScope, cellOrigin: Offset, cellSize: Float) {
         val thickness = cellSize * THICKNESS_RATIO
-        if (position.y == end.y) {
+        if (start.y == end.y) {
             // Horizontal wall: thick line along the top edge of the row,
             // running from the start cell's left edge to the end cell's
             // right edge.
-            val length = (end.x - position.x + 1) * cellSize
+            val length = (end.x - start.x + 1) * cellSize
             scope.drawRect(
                 color = WALL_COLOR,
                 topLeft = Offset(cellOrigin.x, cellOrigin.y - thickness / 2f),
@@ -411,7 +413,7 @@ data class Wall(
             // Vertical wall: thick line along the left edge of the column,
             // running from the start cell's top edge to the end cell's
             // bottom edge.
-            val length = (end.y - position.y + 1) * cellSize
+            val length = (end.y - start.y + 1) * cellSize
             scope.drawRect(
                 color = WALL_COLOR,
                 topLeft = Offset(cellOrigin.x - thickness / 2f, cellOrigin.y),

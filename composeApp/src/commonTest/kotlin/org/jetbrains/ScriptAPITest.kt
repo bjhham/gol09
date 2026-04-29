@@ -64,30 +64,20 @@ class ScriptAPITest {
 
     @Test
     fun token_variables_track_grid_changes() = runTest {
-        var grid = GameGrid(
+        val initial = GameGrid(
             tokens = listOf(
                 Golem(Point(0, 0), Direction.SOUTH),
                 Cheese(Point(0, 5)),
             ),
         )
-        val vm = GameViewModel(
-            getGameGrid = { grid },
-            setGameGrid = { grid = it },
-            isRunning = { false },
-            setRunning = { },
-            getLevelIndex = { 0 },
-            setLevelIndex = { },
-            setWalkAnimation = { },
-            levelMapPaths = emptyList(),
-            tickMillis = 0L,
-        )
+        val vm = viewModelFor(initial)
         val state = buildInitialState(vm)
 
         assertEquals("0", runner.execute(parser.parseExpression("gol.y"), state).asString())
 
         // Advance the golem one cell south; the bridged getter should
         // pick up the new position on its next reference.
-        grid = grid.moveGolem()
+        vm.setGrid(vm.gameGrid!!.moveGolem())
 
         assertEquals("1", runner.execute(parser.parseExpression("gol.y"), state).asString())
     }
@@ -134,17 +124,11 @@ class ScriptAPITest {
     }
 
     private fun viewModelFor(initial: GameGrid): GameViewModel {
-        var grid: GameGrid = initial
-        return GameViewModel(
-            getGameGrid = { grid },
-            setGameGrid = { grid = it },
-            isRunning = { false },
-            setRunning = { },
-            getLevelIndex = { 0 },
-            setLevelIndex = { },
-            setWalkAnimation = { },
+        val vm = GameViewModel(
             levelMapPaths = emptyList(),
             tickMillis = 0L,
         )
+        vm.setGrid(initial)
+        return vm
     }
 }

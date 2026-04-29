@@ -1,8 +1,13 @@
 package org.jetbrains
 
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameMillis
+import androidx.lifecycle.ViewModel
+import gol09.composeapp.generated.resources.Res
 import kotlin.coroutines.cancellation.CancellationException
-import kotlin.coroutines.coroutineContext
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
@@ -12,60 +17,140 @@ import org.jetbrains.game.Cheese
 import org.jetbrains.game.GameGrid
 import org.jetbrains.game.GameToken
 import org.jetbrains.game.Golem
+import org.jetbrains.game.MapParser
 import org.jetbrains.game.Point
 
 /**
  * View model that owns the game's mutable state and exposes the
  * semantic actions that the script bridge calls into.
  *
- * The view model is intentionally free of Compose state types: the host
- * (the [App] composable) supplies simple getter/setter lambdas wrapping
- * its `MutableState` properties, which keeps the model testable without
- * a Compose runtime.
+ * Built on top of `androidx.lifecycle.ViewModel` from the Compose
+ * Multiplatform lifecycle library so that it is obtained from a
+ * composable via `viewModel { GameViewModel(...) }`, survives
+ * recomposition, and is automatically cleaned up by the surrounding
+ * `ViewModelStoreOwner`.
  *
- * Each action mirrors a single bridge declaration: [move], [turnRight],
- * [turnLeft], [warp], plus the [golemX]/[golemY] getters. New bridge
- * actions should generally be added here first, then wired through
- * [buildInitialState] in `ScriptBridge.kt`.
+ * The view model owns its own Compose state — [gameGrid], [isRunning],
+ * [levelIndex], [walkAnimation] — exposed as plain Kotlin properties
+ * backed by [mutableStateOf]. Reading any of these from a composable
+ * subscribes the composable to changes; writing through the action
+ * methods (or the small number of UI-facing setters below) triggers
+ * recomposition just like any other Compose state.
  *
- * @property getGameGrid returns the current [GameGrid], or `null` if no
- *   level has been loaded yet.
- * @property setGameGrid replaces the current [GameGrid].
- * @property isRunning returns whether the simulation is currently running.
- * @property setRunning toggles the simulation running flag.
- * @property getLevelIndex returns the index of the active level inside
- *   [levelMapPaths].
- * @property setLevelIndex switches the active level by index.
- * @property setWalkAnimation publishes the in-flight walk animation (or
- *   clears it when passed `null`).
- * @property levelMapPaths the ordered list of level resource paths used to
- *   resolve [warp] calls.
+ * Each script-facing action mirrors a single bridge declaration:
+ * [move], [turnRight], [turnLeft], [warp], plus the [golem]/[tokens]
+ * accessors. New bridge actions should generally be added here first,
+ * then wired through [buildInitialState] in `ScriptAPI.kt`.
+ *
+ * @property levelMapPaths the ordered list of level resource paths used
+ *   to resolve [warp] calls and to advance to the next level.
  * @property tickMillis duration of a single [move] step, in milliseconds.
  */
 class GameViewModel(
-    private val getGameGrid: () -> GameGrid?,
-    private val setGameGrid: (GameGrid) -> Unit,
-    private val isRunning: () -> Boolean,
-    private val setRunning: (Boolean) -> Unit,
-    private val getLevelIndex: () -> Int,
-    private val setLevelIndex: (Int) -> Unit,
-    private val setWalkAnimation: (WalkAnimation?) -> Unit,
-    private val levelMapPaths: List<String>,
+    val levelMapPaths: List<String>,
     private val tickMillis: Long,
-) {
+) : ViewModel() {
+
+    /** The freshly-parsed initial grid for the current level, or `null` while loading. */
+    var initialGrid: GameGrid? by mutableStateOf(null)
+        private set
+
+    /** The current parsed grid, or `null` while loading. */
+    var gameGrid: GameGrid? by mutableStateOf(null)
+        private set
+
+    /** Index of the currently-loaded level inside [levelMapPaths]. */
+    var levelIndex: Int by mutableStateOf(0)
+        private set
+
+    /** Whether the simulation is currently running. */
+    var isRunning: Boolean by mutableStateOf(false)
+
+    /** Whether the player has dismissed the level-complete overlay for the current level. */
+    var levelCompleteDismissed: Boolean by mutableStateOf(false)
+        private set
+
     /**
-     * Get the current state of the golem
+     * In-flight walk animation, or `null` when the golem is at rest.
+     * See [WalkAnimation] for the semantics.
      */
-    val golem: Golem? get() = getGameGrid()?.golem
+    var walkAnimation: WalkAnimation? by mutableStateOf(null)
+        private set
+
+    /**
+     * The level is complete as soon as the golem occupies a cell that
+     * contains a [Cheese]. Backed by [derivedStateOf] so observers only
+     * re-trigger when the underlying grid changes.
+     */
+    val levelComplete: Boolean by derivedStateOf {
+        val grid = gameGrid ?: return@derivedStateOf false
+        val golemPos = grid.golem.position
+        grid.tokens.any { it is Cheese && it.position == golemPos }
+    }
+
+    /** Get the current state of the golem, or `null` if no level is loaded. */
+    val golem: Golem? get() = gameGrid?.golem
 
     /**
      * The renderable tokens currently on the grid, or an empty list if no
      * level is loaded. Used by the script bridge to expose each token as a
      * named variable whose value carries its grid position.
      */
-    val tokens: List<GameToken> get() = getGameGrid()?.tokens ?: emptyList()
+    val tokens: List<GameToken> get() = gameGrid?.tokens ?: emptyList()
 
-    fun canMove(): Boolean = getGameGrid()?.canMoveGolem() ?: false
+    fun canMove(): Boolean = gameGrid?.canMoveGolem() ?: false
+
+    /**
+     * Reset the current level back to its freshly-loaded [initialGrid]
+     * and stop the simulation. Used by the UI refresh button and the
+     * level-complete overlay's "Play Again" button.
+     */
+    fun resetLevel() {
+        isRunning = false
+        gameGrid = initialGrid
+        walkAnimation = null
+        levelCompleteDismissed = false
+    }
+
+    /**
+     * Advance to the next level in [levelMapPaths] (if any). Stops the
+     * simulation and clears the in-flight walk animation immediately so
+     * the golem doesn't keep moving while the next level loads. The
+     * keyed call to [loadLevel] from the host composable then reloads
+     * the map and resets the per-level state.
+     */
+    fun goToNextLevel() {
+        if (levelIndex < levelMapPaths.lastIndex) {
+            isRunning = false
+            walkAnimation = null
+            levelIndex += 1
+        }
+    }
+
+    /** Test/utility hook: install [grid] as both the initial and current grid. */
+    fun setGrid(grid: GameGrid) {
+        initialGrid = grid
+        gameGrid = grid
+        isRunning = false
+        walkAnimation = null
+        levelCompleteDismissed = false
+    }
+
+    /**
+     * Load (or reload) the level at [levelMapPaths]`[`[levelIndex]`]`.
+     * Resets the per-level UI state so the player starts each level
+     * with the golem at its `START` cell, the simulation paused, and
+     * the level-complete overlay un-dismissed.
+     */
+    suspend fun loadLevel() {
+        val bytes = Res.readBytes(levelMapPaths[levelIndex])
+        val parsed = MapParser().parse(bytes.decodeToString())
+        initialGrid = parsed
+        gameGrid = parsed
+        isRunning = false
+        walkAnimation = null
+        levelCompleteDismissed = false
+    }
 
     /**
      * Advances the golem one cell in its facing direction over
@@ -83,8 +168,8 @@ class GameViewModel(
         // start *another* move after the previous one completed even
         // though the user had asked the simulation to stop.
         currentCoroutineContext().ensureActive()
-        if (!isRunning()) return
-        val grid = getGameGrid() ?: return
+        if (!isRunning) return
+        val grid = gameGrid ?: return
         // If the golem is already standing on the cheese, the level is
         // complete and we must not take another step. The
         // `LaunchedEffect(levelComplete)` that flips `isRunning` to false
@@ -93,7 +178,7 @@ class GameViewModel(
         // this guard the golem walks one cell past the cheese and the
         // level-complete overlay flickers away.
         if (grid.tokens.any { it is Cheese && it.position == grid.golem.position }) {
-            setRunning(false)
+            isRunning = false
             return
         }
         val target = grid.moveGolem()
@@ -120,21 +205,21 @@ class GameViewModel(
             // the golem renders in its idle pose at its new cell. If the
             // grid has been replaced underneath us (e.g. by the refresh
             // button), honour that change instead of stomping on it.
-            if (getGameGrid() === grid) {
-                setGameGrid(target)
+            if (gameGrid === grid) {
+                gameGrid = target
             }
-            setWalkAnimation(null)
+            walkAnimation = null
         }
     }
 
     /** Rotates the golem 90° clockwise in place. */
     fun turnRight() {
-        getGameGrid()?.turnGolemRight()?.let(setGameGrid)
+        gameGrid?.turnGolemRight()?.let { gameGrid = it }
     }
 
     /** Rotates the golem 90° counter-clockwise in place. */
     fun turnLeft() {
-        getGameGrid()?.turnGolemLeft()?.let(setGameGrid)
+        gameGrid?.turnGolemLeft()?.let { gameGrid = it }
     }
 
     /**
@@ -142,9 +227,9 @@ class GameViewModel(
      * `files/maps/level1`). Useful for testing as more stages are added:
      * a script can position the golem on any level without having to
      * advance through the preceding ones via the UI. Updating the level
-     * index triggers the keyed `LaunchedEffect(levelIndex)` in [App] to
-     * reload the map and reset per-level state (including `isRunning`);
-     * we additionally throw [CancellationException] so the
+     * index triggers the keyed [loadLevel] call in [App] to reload the
+     * map and reset per-level state (including [isRunning]); we
+     * additionally throw [CancellationException] so the
      * currently-executing script stops immediately rather than running
      * one more instruction against the freshly-loaded grid.
      */
@@ -153,9 +238,9 @@ class GameViewModel(
         if (targetIndex < 0) {
             error("warp(name): unknown level '$name'")
         }
-        setRunning(false)
-        if (getLevelIndex() != targetIndex) {
-            setLevelIndex(targetIndex)
+        isRunning = false
+        if (levelIndex != targetIndex) {
+            levelIndex = targetIndex
         }
         throw CancellationException("warp(\"$name\")")
     }
@@ -164,16 +249,42 @@ class GameViewModel(
      * Slide the golem from [from] to [to] over [tickMillis], updating
      * the walk-animation state on every frame. Returns once the
      * animation has reached `progress = 1f`.
+     *
+     * The frame-driving primitives (`withFrameMillis`) read the
+     * `MonotonicFrameClock` from the active coroutine context, which —
+     * when this is invoked from a `LaunchedEffect` — is supplied by
+     * the surrounding composition. If the user pauses or resets the
+     * simulation while a step is in progress, the `LaunchedEffect`
+     * driving the script is cancelled and the composition's frame
+     * clock raises [androidx.compose.runtime.LeftCompositionCancellationException]
+     * out of the next `withFrameMillis` call. We are deliberately
+     * inside a `NonCancellable` block at that point (so the animation
+     * runs to completion in the normal case), so we catch that
+     * particular `CancellationException` here and treat it as "skip
+     * to the end of the animation": the golem snaps to its target
+     * cell and the caller commits the move.
      */
     private suspend fun animateWalk(from: Point, to: Point) {
-        setWalkAnimation(WalkAnimation(from = from, to = to, progress = 0f))
-        val startMillis = withFrameMillis { it }
-        while (true) {
-            val nowMillis = withFrameMillis { it }
-            val elapsed = nowMillis - startMillis
-            val progress = (elapsed.toFloat() / tickMillis).coerceIn(0f, 1f)
-            setWalkAnimation(WalkAnimation(from = from, to = to, progress = progress))
-            if (progress >= 1f) break
+        walkAnimation = WalkAnimation(from = from, to = to, progress = 0f)
+        try {
+            val startMillis = withFrameMillis { it }
+            while (true) {
+                val nowMillis = withFrameMillis { it }
+                val elapsed = nowMillis - startMillis
+                val progress = (elapsed.toFloat() / tickMillis).coerceIn(0f, 1f)
+                walkAnimation = WalkAnimation(from = from, to = to, progress = progress)
+                if (progress >= 1f) break
+            }
+        } catch (_: CancellationException) {
+            // The composition's frame clock has been disposed (the
+            // host `LaunchedEffect` was cancelled by pause/reset).
+            // Finish the step instantly so the caller can commit the
+            // move and clear the walk animation in its `finally`-like
+            // tail; without this catch the exception would propagate
+            // out of the `NonCancellable` block in `move()` and
+            // surface as `LeftCompositionCancellationException` to
+            // the user.
+            walkAnimation = WalkAnimation(from = from, to = to, progress = 1f)
         }
     }
 }

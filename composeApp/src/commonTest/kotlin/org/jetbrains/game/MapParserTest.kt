@@ -120,34 +120,9 @@ class MapParserTest {
             listOf(
                 Golem(Point(0, 5), Direction.SOUTH),
                 Cheese(Point(11, 5)),
-                Wall(position = Point(2, 2), end = Point(2, 9)),
+                Wall(start = Point(2, 2), end = Point(2, 9)),
             ),
             model.elements,
-        )
-    }
-
-    @Test
-    fun parses_horizontal_wall_with_x_range() {
-        val text = """
-            START 0,0
-            WALL 0-5,7
-        """.trimIndent()
-
-        val model = parser.parse(text)
-
-        val wall = model.walls.single()
-        assertEquals(Point(0, 7), wall.position)
-        assertEquals(Point(5, 7), wall.end)
-        assertEquals(
-            listOf(
-                Point(0, 7),
-                Point(1, 7),
-                Point(2, 7),
-                Point(3, 7),
-                Point(4, 7),
-                Point(5, 7),
-            ),
-            wall.cells,
         )
     }
 

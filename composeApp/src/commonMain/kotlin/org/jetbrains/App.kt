@@ -32,19 +32,15 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
-import gol09.composeapp.generated.resources.Res
+import androidx.lifecycle.viewmodel.compose.viewModel
+import kotlin.coroutines.cancellation.CancellationException
 import kotlin.math.min
 import kotlinx.coroutines.ensureActive
 import kscript.CompilationException
 import kscript.KScriptParser
 import kscript.KScriptRunner
-import kscript.LoopLimitExceededException
-import kscript.emptyProcessState
 import kscript.parseFile
-import org.jetbrains.game.Cheese
-import org.jetbrains.game.GameGrid
 import org.jetbrains.game.Golem
-import org.jetbrains.game.MapParser
 
 val scriptParser by lazy { KScriptParser() }
 val scriptRunner by lazy { KScriptRunner() }
@@ -92,51 +88,16 @@ private const val INITIAL_CODE = "move()"
 @Preview
 fun App() {
     AppTheme {
-        // Index of the currently-loaded level within [LEVEL_MAP_PATHS]. Advancing
-        // to a new level (e.g. via the "Next Level" button on the level-complete
-        // overlay) updates this and triggers a reload via the keyed
-        // `LaunchedEffect` below.
-        var levelIndex by remember { mutableStateOf(0) }
-
-        // The freshly-parsed initial game grid. `null` until the initial map has finished loading.
-        // This is used both as the starting state and as the target of the refresh button.
-        var initialGrid by remember { mutableStateOf<GameGrid?>(null) }
-
-        // The current parsed game grid. `null` until the initial map has finished loading.
-        var gameGrid by remember { mutableStateOf<GameGrid?>(null) }
-
-        // Whether the simulation is currently running. Toggled by the play/pause button.
-        var isRunning by remember { mutableStateOf(false) }
-
-        // Whether the player has acknowledged the level-complete overlay for the
-        // current level. Reset when the grid is reset (e.g. via refresh) so the
-        // overlay can appear again if the level is replayed.
-        var levelCompleteDismissed by remember { mutableStateOf(false) }
-
-        // Animation state for the golem's movement. While `move()` is in
-        // progress, [walkAnimation] is non-null and describes the cell the
-        // golem is leaving (`from`), the cell it is entering (`to`), and
-        // the progress through the step in the range `[0f, 1f]`. Outside
-        // an active step the field is `null` and the golem is rendered at
-        // its grid cell with no animation. The state lives at this scope
-        // (rather than inside the simulation `LaunchedEffect`) so the
-        // canvas can read it on every recomposition.
-        var walkAnimation by remember { mutableStateOf<WalkAnimation?>(null) }
-
-        // The level is complete as soon as the golem occupies a cell that
-        // contains a [Cheese]. Recomputed from the current grid so the overlay
-        // appears the moment the simulation steps onto the goal cell.
-        val levelComplete = gameGrid?.let { grid ->
-            val golemPos = grid.golem.position
-            grid.tokens.any { it is Cheese && it.position == golemPos }
-        } ?: false
-
-        // Pause the simulation immediately when the level is completed so the
-        // script doesn't keep ticking under the celebration overlay.
-        LaunchedEffect(levelComplete) {
-            if (levelComplete) {
-                isRunning = false
-            }
+        // The game view model owns all gameplay state (current grid,
+        // running flag, level index, walk animation). Obtain it through
+        // the Compose Multiplatform `viewModel { ... }` helper so the
+        // surrounding `ViewModelStoreOwner` keeps the same instance
+        // across recompositions and cleans it up automatically.
+        val vm: GameViewModel = viewModel {
+            GameViewModel(
+                levelMapPaths = LEVEL_MAP_PATHS,
+                tickMillis = SIMULATION_TICK_MILLIS,
+            )
         }
 
         // The user's source code, plus its most recently parsed `KFile`. The
@@ -156,18 +117,18 @@ fun App() {
             )
         }
 
-        // Load (or reload, when [levelIndex] changes) the active level. Resets
-        // the per-level UI state so the player starts each level with the
-        // golem at its `START` cell, the simulation paused, and the
-        // level-complete overlay un-dismissed.
-        LaunchedEffect(levelIndex) {
-            val bytes = Res.readBytes(LEVEL_MAP_PATHS[levelIndex])
-            val parsed = MapParser().parse(bytes.decodeToString())
-            initialGrid = parsed
-            gameGrid = parsed
-            isRunning = false
-            walkAnimation = null
-            levelCompleteDismissed = false
+        // Pause the simulation immediately when the level is completed so the
+        // script doesn't keep ticking under the celebration overlay.
+        val levelComplete = vm.levelComplete
+        LaunchedEffect(levelComplete) {
+            if (levelComplete) {
+                vm.isRunning = false
+            }
+        }
+
+        // Load (or reload, when [vm.levelIndex] changes) the active level.
+        LaunchedEffect(vm.levelIndex) {
+            vm.loadLevel()
         }
 
         // Drive the simulation while running: execute the user's parsed `KFile`
@@ -179,22 +140,8 @@ fun App() {
         // allowed to finish first so the golem doesn't stop halfway between
         // cells; cancellation is then observed when the script runner asks
         // for its next instruction.
-        LaunchedEffect(isRunning) {
-            if (!isRunning) {
-                walkAnimation = null
-                return@LaunchedEffect
-            }
-            val vm = GameViewModel(
-                getGameGrid = { gameGrid },
-                setGameGrid = { gameGrid = it },
-                isRunning = { isRunning },
-                setRunning = { isRunning = it },
-                getLevelIndex = { levelIndex },
-                setLevelIndex = { levelIndex = it },
-                setWalkAnimation = { walkAnimation = it },
-                levelMapPaths = LEVEL_MAP_PATHS,
-                tickMillis = SIMULATION_TICK_MILLIS,
-            )
+        LaunchedEffect(vm.isRunning) {
+            if (!vm.isRunning) return@LaunchedEffect
             val state = buildInitialState(vm, loopLimit = SCRIPT_LOOP_LIMIT)
             try {
                 while (true) {
@@ -205,7 +152,7 @@ fun App() {
                     // toggling `isRunning` (via pause or refresh) actually
                     // stops the script between top-level executions.
                     coroutineContext.ensureActive()
-                    if (!isRunning) break
+                    if (!vm.isRunning) break
                     val file = kFile ?: break
                     // Tick the shared loop counter for each top-level
                     // execution iteration so a non-suspending script
@@ -215,13 +162,20 @@ fun App() {
                     state.recordLoopIteration()
                     scriptRunner.execute(file, state)
                 }
+            } catch (e: CancellationException) {
+                // Normal cancellation of this `LaunchedEffect` (e.g., the
+                // user pressed pause/refresh, or the host composition was
+                // disposed — the latter surfaces as the
+                // `LeftCompositionCancellationException` subclass). Let it
+                // propagate so structured concurrency can finish tearing
+                // the coroutine down; do *not* log it as an error.
+                throw e
             } catch (e: Exception) {
                 // The script blew through its iteration budget — likely an
                 // empty program or a `while (true) {}` that never yields.
                 // Pause the simulation so the user can edit and try again
                 // rather than wedging the play loop.
-                isRunning = false
-                walkAnimation = null
+                vm.isRunning = false
                 // TODO surface the error to the user
                 e.printStackTrace()
             }
@@ -235,7 +189,8 @@ fun App() {
                 .fillMaxSize(),
         ) {
             // Upper half: canvas for drawing the game state.
-            val currentGrid = gameGrid
+            val currentGrid = vm.gameGrid
+            val walkAnimation = vm.walkAnimation
             Canvas(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -316,15 +271,10 @@ fun App() {
                 // Refresh resets the grid back to the freshly-loaded initial state
                 // and stops the simulation. Disabled while the grid already matches
                 // that initial state (i.e. nothing to refresh).
-                val initial = initialGrid
-                val isInitialState = initial != null && gameGrid == initial
+                val initial = vm.initialGrid
+                val isInitialState = initial != null && vm.gameGrid == initial
                 IconButton(
-                    onClick = {
-                        isRunning = false
-                        gameGrid = initial
-                        walkAnimation = null
-                        levelCompleteDismissed = false
-                    },
+                    onClick = { vm.resetLevel() },
                     enabled = !isInitialState,
                 ) {
                     Icon(
@@ -338,10 +288,10 @@ fun App() {
                 // consume; once the user is running, the pause action is always
                 // available so they can stop the simulation.
                 IconButton(
-                    onClick = { isRunning = !isRunning },
-                    enabled = isRunning || (kFile != null && !levelComplete),
+                    onClick = { vm.isRunning = !vm.isRunning },
+                    enabled = vm.isRunning || (kFile != null && !levelComplete),
                 ) {
-                    if (isRunning) {
+                    if (vm.isRunning) {
                         Icon(
                             imageVector = Icons.Filled.Pause,
                             contentDescription = "Pause",
@@ -372,32 +322,15 @@ fun App() {
             // declarations exposed to the script (so the user sees the same
             // identifiers they can call) plus a small set of Kotlin keywords.
             // The token-derived getters depend on which level is loaded, so
-            // we recompute the list whenever the level changes — taking an
-            // initial snapshot of the grid at that point. We deliberately do
-            // *not* re-key on `gameGrid`: the grid mutates on every `move()`
-            // tick, and recomputing on those mutations would invalidate the
-            // surrounding composables and put the play loop's coroutine out
-            // of sync with the App's state (the running coroutine ends up
-            // holding closures over a stale `isRunning`, so `move()` early-
-            // returns even though the App still thinks the simulation is
-            // running, and the play loop spins until the failsafe trips).
-            // The lambdas wrapping the view model are no-ops for the
-            // purposes of name discovery: `buildInitialState` only reads
-            // [GameViewModel.tokens], which is safe to evaluate against the
-            // initial grid without driving the simulation.
-            val editorCompletions = remember(levelIndex) {
-                val grid = gameGrid
-                val vm = GameViewModel(
-                    getGameGrid = { grid },
-                    setGameGrid = {},
-                    isRunning = { false },
-                    setRunning = {},
-                    getLevelIndex = { 0 },
-                    setLevelIndex = {},
-                    setWalkAnimation = {},
-                    levelMapPaths = LEVEL_MAP_PATHS,
-                    tickMillis = SIMULATION_TICK_MILLIS,
-                )
+            // we recompute the list whenever the level changes. We
+            // deliberately do *not* re-key on `vm.gameGrid`: the grid mutates
+            // on every `move()` tick, and recomputing on those mutations
+            // would invalidate the surrounding composables and put the play
+            // loop's coroutine out of sync with the view model state.
+            // `buildInitialState` only reads [GameViewModel.tokens] for name
+            // discovery, which is safe to evaluate against the current view
+            // model without driving the simulation.
+            val editorCompletions = remember(vm.levelIndex) {
                 completionsFor(buildInitialState(vm))
             }
             CodeEditor(
@@ -412,7 +345,7 @@ fun App() {
                     }
                 },
                 kFile = kFile,
-                enabled = !isRunning,
+                enabled = !vm.isRunning,
                 completions = editorCompletions,
                 modifier = Modifier
                     .fillMaxWidth()
@@ -427,8 +360,8 @@ fun App() {
         // the player. The card offers a "Play Again" button that resets
         // the current level, plus — when there is a subsequent level
         // available — a "Next Level" button that advances to it.
-        if (levelComplete && !levelCompleteDismissed) {
-            val hasNextLevel = levelIndex < LEVEL_MAP_PATHS.lastIndex
+        if (levelComplete && !vm.levelCompleteDismissed) {
+            val hasNextLevel = vm.levelIndex < LEVEL_MAP_PATHS.lastIndex
             Box(
                 modifier = Modifier
                     .fillMaxSize()
@@ -455,18 +388,10 @@ fun App() {
                             Button(
                                 onClick = {
                                     // Reset to the freshly-loaded initial grid for
-                                    // the current level and clear any in-flight
-                                    // animation so the golem starts cleanly.
-                                    // The grid reset moves the golem off the
-                                    // cheese, so `levelComplete` flips back to
-                                    // false and hides the overlay; clearing
-                                    // `levelCompleteDismissed` ensures the
-                                    // celebration appears again the next time
-                                    // the player reaches the cheese.
-                                    isRunning = false
-                                    gameGrid = initialGrid
-                                    walkAnimation = null
-                                    levelCompleteDismissed = false
+                                    // the current level. The grid reset moves the
+                                    // golem off the cheese, so `levelComplete`
+                                    // flips back to false and hides the overlay.
+                                    vm.resetLevel()
                                 },
                             ) {
                                 Text("Play Again")
@@ -474,17 +399,11 @@ fun App() {
                             if (hasNextLevel) {
                                 Button(
                                     onClick = {
-                                        // Stop the simulation and clear any
-                                        // in-flight animation immediately so
-                                        // the golem doesn't keep moving while
-                                        // the next level loads. Advancing the
-                                        // level index triggers the
-                                        // `LaunchedEffect(levelIndex)` above
-                                        // to reload the map and reset the
+                                        // Stop the simulation and advance the level
+                                        // index. The keyed `LaunchedEffect` above
+                                        // then reloads the map and resets the
                                         // remaining per-level state.
-                                        isRunning = false
-                                        walkAnimation = null
-                                        levelIndex += 1
+                                        vm.goToNextLevel()
                                     },
                                 ) {
                                     Text("Next Level")

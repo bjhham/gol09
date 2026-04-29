@@ -82,7 +82,12 @@ data class GameGrid(
      * Returns whether [position] is occupied by any [Wall] segment.
      */
     private fun isWall(position: Point): Boolean =
-        walls.any { position in it.cells }
+        walls.any { wall ->
+            linesIntersect(
+                golem.position * 2 to position * 2,
+                wall.doubleScaledLine()
+            )
+        }
 
     /**
      * Returns a new [GameGrid] with the golem rotated 90 degrees clockwise

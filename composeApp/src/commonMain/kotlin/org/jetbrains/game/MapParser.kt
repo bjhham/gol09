@@ -120,7 +120,7 @@ class MapParser {
         val end = Point(xRange.second, yRange.second)
         validatePosition(start, lineNumber = lineNumber)
         validatePosition(end, lineNumber = lineNumber)
-        return Wall(position = start, end = end)
+        return Wall(start, end)
     }
 
     private fun parseAxis(text: String, axis: String, lineNumber: Int): Pair<Int, Int> {
