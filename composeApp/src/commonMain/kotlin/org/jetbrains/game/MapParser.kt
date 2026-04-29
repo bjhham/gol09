@@ -30,7 +30,7 @@ class MapParser {
      * @throws MapParseException if the input is malformed or required objects are missing.
      */
     fun parse(text: String): GameGrid {
-        var start: Position? = null
+        var start: Point? = null
         val cheeses = mutableListOf<Cheese>()
         val walls = mutableListOf<Wall>()
 
@@ -83,7 +83,7 @@ class MapParser {
         )
     }
 
-    private fun parsePosition(coordsText: String, lineNumber: Int): Position {
+    private fun parsePosition(coordsText: String, lineNumber: Int): Point {
         val coords = coordsText.split(",")
         if (coords.size != 2) {
             throw MapParseException(
@@ -94,7 +94,7 @@ class MapParser {
             ?: throw MapParseException("Invalid X coordinate on line $lineNumber: '${coords[0]}'")
         val y = coords[1].toIntOrNull()
             ?: throw MapParseException("Invalid Y coordinate on line $lineNumber: '${coords[1]}'")
-        return Position(x, y)
+        return Point(x, y)
     }
 
     private fun parseWall(coordsText: String, lineNumber: Int): Wall {
@@ -116,8 +116,8 @@ class MapParser {
                 "Wall must span more than one cell: one of X or Y must be a range on line $lineNumber",
             )
         }
-        val start = Position(xRange.first, yRange.first)
-        val end = Position(xRange.second, yRange.second)
+        val start = Point(xRange.first, yRange.first)
+        val end = Point(xRange.second, yRange.second)
         validatePosition(start, lineNumber = lineNumber)
         validatePosition(end, lineNumber = lineNumber)
         return Wall(position = start, end = end)
@@ -155,7 +155,7 @@ class MapParser {
         }
     }
 
-    private fun validatePosition(position: Position, lineNumber: Int? = null) {
+    private fun validatePosition(position: Point, lineNumber: Int? = null) {
         if (position.x !in 0 until GRID_SIZE || position.y !in 0 until GRID_SIZE) {
             val suffix = lineNumber?.let { " on line $it" } ?: ""
             throw MapParseException(

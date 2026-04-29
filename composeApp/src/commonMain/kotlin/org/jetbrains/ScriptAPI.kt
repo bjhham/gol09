@@ -1,5 +1,8 @@
 package org.jetbrains
 
+import kscript.KClassDeclaration
+import kscript.KClassInstance
+import kscript.KClassKind
 import kscript.KFunctionParameter
 import kscript.KIdentifier
 import kscript.KInt
@@ -7,11 +10,14 @@ import kscript.KString
 import kscript.KToken
 import kscript.KTokenData
 import kscript.KTokenType
+import kscript.KValOrVar
+import kscript.KValue
 import kscript.KVariableDeclaration
 import kscript.ProcessState
 import kscript.bridgeFunctionVoid
 import kscript.bridgeGetter
 import kscript.emptyProcessState
+import org.jetbrains.game.GameToken
 
 /**
  * Build a [ProcessState] populated with the bridge declarations exposed
@@ -48,10 +54,75 @@ fun buildInitialState(vm: GameViewModel): ProcessState {
     state += bridgeGetter("x", INT_TYPE) { intValue(vm.golemX) }
     state += bridgeGetter("y", INT_TYPE) { intValue(vm.golemY) }
 
+    // Expose every renderable token on the grid as a script variable
+    // named after [GameToken.name], whose value is a [Position] data
+    // class instance carrying the token's grid coordinates. This lets
+    // user scripts compare positions, e.g. `gol.x == cheese.x`. Like
+    // the `x`/`y` getters above, each reference re-evaluates against
+    // the current grid so the values stay fresh as the golem moves.
+    for (token in vm.tokens) {
+        val variableName = token.name
+        state += bridgeGetter(variableName, POSITION_TYPE) {
+            positionValue(vm, variableName)
+        }
+    }
+
     return state
 }
 
 private val INT_TYPE = KIdentifier("Int")
+private val POSITION_TYPE = KIdentifier("Position")
+private val X_NAME = KIdentifier("x")
+private val Y_NAME = KIdentifier("y")
+
+/**
+ * The synthetic `data class Position(val x: Int, val y: Int)` that
+ * backs the per-token bridge getters. Member access on a
+ * [KClassInstance] reads from its `properties` map directly, so this
+ * declaration only needs the [name][KClassDeclaration.name] used when
+ * rendering the value (`Position(x = ..., y = ...)`).
+ */
+private val POSITION_DECL = KClassDeclaration(
+    children = emptyList(),
+    annotations = emptyList(),
+    visibility = null,
+    name = POSITION_TYPE,
+    kind = KClassKind.DATA,
+    typeParameters = emptyList(),
+    superTypes = emptyList(),
+    declarations = listOf(
+        KVariableDeclaration(
+            children = emptyList(),
+            annotations = emptyList(),
+            mutability = KValOrVar.VAL,
+            name = X_NAME,
+            initializer = null,
+        ),
+        KVariableDeclaration(
+            children = emptyList(),
+            annotations = emptyList(),
+            mutability = KValOrVar.VAL,
+            name = Y_NAME,
+            initializer = null,
+        ),
+    ),
+)
 
 private fun intValue(value: Int): KInt =
     KInt(KToken(KTokenData.Text(KTokenType.INTEGER_LITERAL, value.toString())), value)
+
+/**
+ * Build a [Position] [KClassInstance] for the (current) token named
+ * [tokenName] on [vm]'s grid. Re-evaluated on every reference so the
+ * value reflects the live grid; if the token has been removed (e.g.
+ * after a level switch) the previous coordinates are reported.
+ */
+private fun positionValue(vm: GameViewModel, tokenName: String): KClassInstance {
+    val token: GameToken? = vm.tokens.firstOrNull { it.name == tokenName }
+    val position = token?.position
+    val properties = mutableMapOf<KIdentifier, KValue>(
+        X_NAME to intValue(position?.x ?: 0),
+        Y_NAME to intValue(position?.y ?: 0),
+    )
+    return KClassInstance(POSITION_DECL, properties)
+}

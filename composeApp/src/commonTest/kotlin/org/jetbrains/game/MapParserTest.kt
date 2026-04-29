@@ -17,10 +17,10 @@ class MapParserTest {
 
         assertEquals(12, model.width)
         assertEquals(12, model.height)
-        assertEquals(Position(0, 0), model.golem.position)
+        assertEquals(Point(0, 0), model.golem.position)
         assertEquals(Direction.SOUTH, model.golem.facing)
         // The golem must also appear in the rendered token list.
-        assertEquals(listOf(Golem(Position(0, 0), Direction.SOUTH)), model.tokens)
+        assertEquals(listOf(Golem(Point(0, 0), Direction.SOUTH)), model.tokens)
     }
 
     @Test
@@ -32,12 +32,12 @@ class MapParserTest {
 
         val model = parser.parse(text)
 
-        assertEquals(Position(0, 0), model.golem.position)
+        assertEquals(Point(0, 0), model.golem.position)
         // The cheese should be present alongside the golem in the rendered token list.
         assertEquals(
             listOf(
-                Golem(Position(0, 0), Direction.SOUTH),
-                Cheese(Position(11, 11)),
+                Golem(Point(0, 0), Direction.SOUTH),
+                Cheese(Point(11, 11)),
             ),
             model.tokens,
         )
@@ -60,7 +60,7 @@ class MapParserTest {
 
         val model = parser.parse(text)
 
-        assertEquals(Position(3, 5), model.golem.position)
+        assertEquals(Point(3, 5), model.golem.position)
         assertEquals(Direction.SOUTH, model.golem.facing)
     }
 
@@ -118,9 +118,9 @@ class MapParserTest {
 
         assertEquals(
             listOf(
-                Golem(Position(0, 5), Direction.SOUTH),
-                Cheese(Position(11, 5)),
-                Wall(position = Position(2, 2), end = Position(2, 9)),
+                Golem(Point(0, 5), Direction.SOUTH),
+                Cheese(Point(11, 5)),
+                Wall(position = Point(2, 2), end = Point(2, 9)),
             ),
             model.elements,
         )
@@ -136,16 +136,16 @@ class MapParserTest {
         val model = parser.parse(text)
 
         val wall = model.walls.single()
-        assertEquals(Position(0, 7), wall.position)
-        assertEquals(Position(5, 7), wall.end)
+        assertEquals(Point(0, 7), wall.position)
+        assertEquals(Point(5, 7), wall.end)
         assertEquals(
             listOf(
-                Position(0, 7),
-                Position(1, 7),
-                Position(2, 7),
-                Position(3, 7),
-                Position(4, 7),
-                Position(5, 7),
+                Point(0, 7),
+                Point(1, 7),
+                Point(2, 7),
+                Point(3, 7),
+                Point(4, 7),
+                Point(5, 7),
             ),
             wall.cells,
         )

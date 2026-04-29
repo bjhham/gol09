@@ -9,26 +9,26 @@ class GameGridTest {
     @Test
     fun moveGolem_advances_one_cell_south() {
         val grid = GameGrid(
-            tokens = listOf(Golem(Position(0, 0), Direction.SOUTH)),
+            tokens = listOf(Golem(Point(0, 0), Direction.SOUTH)),
         )
 
         val moved = grid.moveGolem()
 
-        assertEquals(Position(0, 1), moved.golem.position)
+        assertEquals(Point(0, 1), moved.golem.position)
         assertEquals(Direction.SOUTH, moved.golem.facing)
     }
 
     @Test
     fun moveGolem_advances_one_cell_for_each_direction() {
         val cases = listOf(
-            Direction.NORTH to Position(5, 4),
-            Direction.EAST to Position(6, 5),
-            Direction.SOUTH to Position(5, 6),
-            Direction.WEST to Position(4, 5),
+            Direction.NORTH to Point(5, 4),
+            Direction.EAST to Point(6, 5),
+            Direction.SOUTH to Point(5, 6),
+            Direction.WEST to Point(4, 5),
         )
         for ((direction, expected) in cases) {
             val grid = GameGrid(
-                tokens = listOf(Golem(Position(5, 5), direction)),
+                tokens = listOf(Golem(Point(5, 5), direction)),
             )
             assertEquals(expected, grid.moveGolem().golem.position, "for $direction")
         }
@@ -37,7 +37,7 @@ class GameGridTest {
     @Test
     fun moveGolem_at_south_edge_does_nothing() {
         val grid = GameGrid(
-            tokens = listOf(Golem(Position(0, GRID_SIZE - 1), Direction.SOUTH)),
+            tokens = listOf(Golem(Point(0, GRID_SIZE - 1), Direction.SOUTH)),
         )
 
         val moved = grid.moveGolem()
@@ -48,12 +48,12 @@ class GameGridTest {
     @Test
     fun moveGolem_at_each_edge_does_nothing() {
         val edges = listOf(
-            Position(0, 0) to Direction.NORTH,
-            Position(0, 0) to Direction.WEST,
-            Position(GRID_SIZE - 1, 0) to Direction.EAST,
-            Position(GRID_SIZE - 1, 0) to Direction.NORTH,
-            Position(0, GRID_SIZE - 1) to Direction.SOUTH,
-            Position(GRID_SIZE - 1, GRID_SIZE - 1) to Direction.EAST,
+            Point(0, 0) to Direction.NORTH,
+            Point(0, 0) to Direction.WEST,
+            Point(GRID_SIZE - 1, 0) to Direction.EAST,
+            Point(GRID_SIZE - 1, 0) to Direction.NORTH,
+            Point(0, GRID_SIZE - 1) to Direction.SOUTH,
+            Point(GRID_SIZE - 1, GRID_SIZE - 1) to Direction.EAST,
         )
         for ((position, direction) in edges) {
             val grid = GameGrid(
@@ -67,9 +67,9 @@ class GameGridTest {
     fun moveGolem_blocked_by_wall_in_front() {
         val grid = GameGrid(
             tokens = listOf(
-                Golem(Position(5, 5), Direction.SOUTH),
+                Golem(Point(5, 5), Direction.SOUTH),
             ),
-            walls = listOf(Wall(Position(3, 6), Position(7, 6)))
+            walls = listOf(Wall(Point(3, 6), Point(7, 6)))
         )
 
         assertSame(grid, grid.moveGolem())
@@ -80,15 +80,15 @@ class GameGridTest {
         // Single-cell wall placed one step ahead of the golem in the
         // direction it is facing; movement must be prevented.
         val cases = listOf(
-            Direction.NORTH to Position(5, 4),
-            Direction.EAST to Position(6, 5),
-            Direction.SOUTH to Position(5, 6),
-            Direction.WEST to Position(4, 5),
+            Direction.NORTH to Point(5, 4),
+            Direction.EAST to Point(6, 5),
+            Direction.SOUTH to Point(5, 6),
+            Direction.WEST to Point(4, 5),
         )
         for ((direction, wallCell) in cases) {
             val grid = GameGrid(
                 tokens = listOf(
-                    Golem(Position(5, 5), direction)
+                    Golem(Point(5, 5), direction)
                 ),
                 walls = listOf(
                     // A wall must span at least two cells, so extend it
@@ -104,17 +104,17 @@ class GameGridTest {
     fun moveGolem_advances_when_wall_is_not_in_front() {
         val grid = GameGrid(
             tokens = listOf(
-                Golem(Position(5, 5), Direction.SOUTH),
+                Golem(Point(5, 5), Direction.SOUTH),
             ),
             walls = listOf(
                 // Wall two cells ahead, not directly in front.
-                Wall(Position(3, 7), Position(7, 7)),
+                Wall(Point(3, 7), Point(7, 7)),
             )
         )
 
         val moved = grid.moveGolem()
 
-        assertEquals(Position(5, 6), moved.golem.position)
+        assertEquals(Point(5, 6), moved.golem.position)
     }
 
     @Test
@@ -127,11 +127,11 @@ class GameGridTest {
         )
         for ((from, expected) in cases) {
             val grid = GameGrid(
-                tokens = listOf(Golem(Position(5, 5), from)),
+                tokens = listOf(Golem(Point(5, 5), from)),
             )
             val turned = grid.turnGolemRight()
             assertEquals(expected, turned.golem.facing, "right from $from")
-            assertEquals(Position(5, 5), turned.golem.position, "right from $from preserves position")
+            assertEquals(Point(5, 5), turned.golem.position, "right from $from preserves position")
         }
     }
 
@@ -145,23 +145,23 @@ class GameGridTest {
         )
         for ((from, expected) in cases) {
             val grid = GameGrid(
-                tokens = listOf(Golem(Position(5, 5), from)),
+                tokens = listOf(Golem(Point(5, 5), from)),
             )
             val turned = grid.turnGolemLeft()
             assertEquals(expected, turned.golem.facing, "left from $from")
-            assertEquals(Position(5, 5), turned.golem.position, "left from $from preserves position")
+            assertEquals(Point(5, 5), turned.golem.position, "left from $from preserves position")
         }
     }
 
     @Test
     fun four_right_turns_returns_to_original_direction() {
         val grid = GameGrid(
-            tokens = listOf(Golem(Position(3, 7), Direction.NORTH)),
+            tokens = listOf(Golem(Point(3, 7), Direction.NORTH)),
         )
 
         val rotated = grid.turnGolemRight().turnGolemRight().turnGolemRight().turnGolemRight()
 
         assertEquals(Direction.NORTH, rotated.golem.facing)
-        assertEquals(Position(3, 7), rotated.golem.position)
+        assertEquals(Point(3, 7), rotated.golem.position)
     }
 }

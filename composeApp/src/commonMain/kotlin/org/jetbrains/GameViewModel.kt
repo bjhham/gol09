@@ -9,7 +9,8 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import org.jetbrains.game.Cheese
 import org.jetbrains.game.GameGrid
-import org.jetbrains.game.Position
+import org.jetbrains.game.GameToken
+import org.jetbrains.game.Point
 
 /**
  * View model that owns the game's mutable state and exposes the
@@ -56,6 +57,13 @@ class GameViewModel(
 
     /** The golem's current `y` coordinate, or `0` if no level is loaded. */
     val golemY: Int get() = getGameGrid()?.golem?.position?.y ?: 0
+
+    /**
+     * The renderable tokens currently on the grid, or an empty list if no
+     * level is loaded. Used by the script bridge to expose each token as a
+     * named variable whose value carries its grid position.
+     */
+    val tokens: List<GameToken> get() = getGameGrid()?.tokens ?: emptyList()
 
     /**
      * Advances the golem one cell in its facing direction over
@@ -155,7 +163,7 @@ class GameViewModel(
      * the walk-animation state on every frame. Returns once the
      * animation has reached `progress = 1f`.
      */
-    private suspend fun animateWalk(from: Position, to: Position) {
+    private suspend fun animateWalk(from: Point, to: Point) {
         setWalkAnimation(WalkAnimation(from = from, to = to, progress = 0f))
         val startMillis = withFrameMillis { it }
         while (true) {
@@ -177,7 +185,7 @@ class GameViewModel(
  * the golem occupying a cheese cell) in sync with the visible motion.
  */
 data class WalkAnimation(
-    val from: Position,
-    val to: Position,
+    val from: Point,
+    val to: Point,
     val progress: Float,
 )

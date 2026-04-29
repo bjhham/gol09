@@ -9,28 +9,16 @@ const val GRID_SIZE: Int = 12
  * A position on the game grid. The origin (0, 0) is the top-left corner;
  * x increases to the east and y increases to the south.
  */
-data class Position(val x: Int, val y: Int)
+data class Point(val x: Int, val y: Int)
 
 /**
  * The four cardinal directions an entity can face on the grid.
  */
-enum class Direction {
-    NORTH,
-    EAST,
-    SOUTH,
-    WEST;
-
-    /**
-     * The unit step on the grid corresponding to moving one cell in this
-     * direction. Recall that `y` increases to the south.
-     */
-    val delta: Position
-        get() = when (this) {
-            NORTH -> Position(0, -1)
-            EAST -> Position(1, 0)
-            SOUTH -> Position(0, 1)
-            WEST -> Position(-1, 0)
-        }
+enum class Direction(val vector: Point) {
+    NORTH(Point(0, -1)),
+    EAST(Point(1, 0)),
+    SOUTH(Point(0, 1)),
+    WEST(Point(-1, 0));
 }
 
 /**
@@ -54,7 +42,7 @@ data class GameGrid(
     /**
      * Returns whether the cell at [position] is inside the grid bounds.
      */
-    fun isInBounds(position: Position): Boolean =
+    fun isInBounds(position: Point): Boolean =
         position.x in 0 until width && position.y in 0 until height
 
     /**
@@ -64,9 +52,9 @@ data class GameGrid(
      */
     fun moveGolem(): GameGrid {
         val current = golem
-        val next = Position(
-            x = current.position.x + current.facing.delta.x,
-            y = current.position.y + current.facing.delta.y,
+        val next = Point(
+            x = current.position.x + current.facing.vector.x,
+            y = current.position.y + current.facing.vector.y,
         )
         if (!isInBounds(next)) return this
         if (isWall(next)) return this
@@ -77,7 +65,7 @@ data class GameGrid(
     /**
      * Returns whether [position] is occupied by any [Wall] segment.
      */
-    private fun isWall(position: Position): Boolean =
+    private fun isWall(position: Point): Boolean =
         walls.any { position in it.cells }
 
     /**

@@ -15,7 +15,7 @@ sealed interface GameDrawable {
      * The grid cell this token occupies. The origin `(0, 0)` is the
      * top-left corner of the grid.
      */
-    val position: Position
+    val position: Point
 
     /**
      * Paint this token onto [scope] inside the cell rectangle whose
@@ -49,7 +49,7 @@ sealed interface GameToken: GameDrawable {
  *    facing west.
  */
 data class Golem(
-    override val position: Position,
+    override val position: Point,
     val facing: Direction,
 ) : GameToken {
     override val name: String get() = "gol"
@@ -369,8 +369,8 @@ data class Golem(
  * vertical wall) and traced along the full length of the ranged dimension.
  */
 data class Wall(
-    override val position: Position,
-    val end: Position,
+    override val position: Point,
+    val end: Point,
 ) : GameDrawable {
 
     init {
@@ -385,11 +385,11 @@ data class Wall(
     /**
      * Every cell covered by this wall, including both endpoints.
      */
-    val cells: List<Position>
+    val cells: List<Point>
         get() = if (position.y == end.y) {
-            (position.x..end.x).map { Position(it, position.y) }
+            (position.x..end.x).map { Point(it, position.y) }
         } else {
-            (position.y..end.y).map { Position(position.x, it) }
+            (position.y..end.y).map { Point(position.x, it) }
         }
 
     override fun paint(scope: DrawScope, cellOrigin: Offset, cellSize: Float) {
@@ -434,7 +434,7 @@ data class Wall(
  * no per-orientation variants.
  */
 data class Cheese(
-    override val position: Position,
+    override val position: Point,
 ) : GameToken {
     override val name: String get() = "cheese"
 
