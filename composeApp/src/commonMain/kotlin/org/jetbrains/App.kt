@@ -214,13 +214,15 @@ fun App() {
                     state.recordLoopIteration()
                     scriptRunner.execute(file, state)
                 }
-            } catch (_: LoopLimitExceededException) {
+            } catch (e: Exception) {
                 // The script blew through its iteration budget — likely an
                 // empty program or a `while (true) {}` that never yields.
                 // Pause the simulation so the user can edit and try again
                 // rather than wedging the play loop.
                 isRunning = false
                 walkAnimation = null
+                // TODO surface the error to the user
+                e.printStackTrace()
             }
         }
 
