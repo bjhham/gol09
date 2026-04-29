@@ -4,6 +4,7 @@ import androidx.compose.runtime.withFrameMillis
 import kotlin.coroutines.cancellation.CancellationException
 import kotlin.coroutines.coroutineContext
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
@@ -81,7 +82,8 @@ class GameViewModel(
         // stop mid-cell; without this guard the script would happily
         // start *another* move after the previous one completed even
         // though the user had asked the simulation to stop.
-        coroutineContext.ensureActive()
+        currentCoroutineContext().ensureActive()
+        println("isRunning move: ${isRunning()}")
         if (!isRunning()) return
         val grid = getGameGrid() ?: return
         // If the golem is already standing on the cheese, the level is
@@ -98,6 +100,7 @@ class GameViewModel(
         val target = grid.moveGolem()
         val from = grid.golem.position
         val to = target.golem.position
+        println("$from to $to")
         // Run the step inside a NonCancellable context so that pressing
         // pause mid-step lets the current move animation complete before
         // the simulation coroutine is cancelled. Cancellation will be

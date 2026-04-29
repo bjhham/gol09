@@ -16,7 +16,8 @@ data class Point(val x: Int, val y: Int) {
     operator fun times(factor: Int) = Point(x * factor, y * factor)
     operator fun div(factor: Int) = Point(x / factor, y / factor)
     operator fun unaryMinus() = Point(-x, -y)
-    infix fun mod(other: Int) = (x % other + other) % other
+
+    override fun toString(): String = "($x, $y)"
 }
 
 /**
@@ -64,14 +65,18 @@ data class GameGrid(
         if (!isInBounds(next)) return this
         if (isWall(next)) return this
         val moved = current.copy(position = next)
-        return copy(tokens = tokens.map { if (it === current) moved else it })
+        return copy(tokens = tokens.map {
+            if (it === current) moved else it
+        })
     }
 
     /**
      * Returns whether the golem can move one cell in the direction it is facing.
      */
     fun canMoveGolem(): Boolean =
-        (golem.position + golem.facing.vector).let { isInBounds(it) && !isWall(it) }
+        (golem.position + golem.facing.vector).let {
+            isInBounds(it) && !isWall(it)
+        }
 
     /**
      * Returns whether [position] is occupied by any [Wall] segment.

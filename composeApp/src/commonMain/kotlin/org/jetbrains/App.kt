@@ -39,6 +39,7 @@ import kscript.CompilationException
 import kscript.KScriptParser
 import kscript.KScriptRunner
 import kscript.LoopLimitExceededException
+import kscript.emptyProcessState
 import kscript.parseFile
 import org.jetbrains.game.Cheese
 import org.jetbrains.game.GameGrid
@@ -204,6 +205,7 @@ fun App() {
                     // toggling `isRunning` (via pause or refresh) actually
                     // stops the script between top-level executions.
                     coroutineContext.ensureActive()
+                    println("isRunning App: $isRunning")
                     if (!isRunning) break
                     val file = kFile ?: break
                     // Tick the shared loop counter for each top-level
@@ -371,13 +373,20 @@ fun App() {
             // declarations exposed to the script (so the user sees the same
             // identifiers they can call) plus a small set of Kotlin keywords.
             // The token-derived getters depend on which level is loaded, so
-            // we recompute the list whenever the grid changes — keeping the
-            // suggestions in sync with the available `Position`-typed
-            // variables. The lambdas wrapping the view model are no-ops for
-            // the purposes of name discovery: `buildInitialState` only reads
+            // we recompute the list whenever the level changes — taking an
+            // initial snapshot of the grid at that point. We deliberately do
+            // *not* re-key on `gameGrid`: the grid mutates on every `move()`
+            // tick, and recomputing on those mutations would invalidate the
+            // surrounding composables and put the play loop's coroutine out
+            // of sync with the App's state (the running coroutine ends up
+            // holding closures over a stale `isRunning`, so `move()` early-
+            // returns even though the App still thinks the simulation is
+            // running, and the play loop spins until the failsafe trips).
+            // The lambdas wrapping the view model are no-ops for the
+            // purposes of name discovery: `buildInitialState` only reads
             // [GameViewModel.tokens], which is safe to evaluate against the
-            // current grid without driving the simulation.
-            val editorCompletions = remember(gameGrid) {
+            // initial grid without driving the simulation.
+            val editorCompletions = remember(levelIndex) {
                 val grid = gameGrid
                 val vm = GameViewModel(
                     getGameGrid = { grid },
