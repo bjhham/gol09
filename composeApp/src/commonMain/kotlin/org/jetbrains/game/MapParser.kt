@@ -78,8 +78,8 @@ class MapParser {
         validatePosition(startPos)
 
         return GameGrid(
-            tokens = listOf(Golem(position = startPos, facing = Direction.SOUTH)) +
-                walls + cheeses,
+            tokens = listOf(Golem(position = startPos, facing = Direction.SOUTH)) + cheeses,
+            walls = walls
         )
     }
 

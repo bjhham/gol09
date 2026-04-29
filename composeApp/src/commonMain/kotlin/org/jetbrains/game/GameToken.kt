@@ -9,14 +9,8 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import kotlin.math.PI
 import kotlin.math.sin
 
-/**
- * Something that occupies a cell on the [GameGrid] and knows how to paint
- * itself onto a Compose [Canvas][androidx.compose.foundation.Canvas].
- *
- * Implementations are intentionally simple, schematic graphics — the goal
- * is gameplay clarity rather than realistic art.
- */
-sealed interface GameToken {
+
+sealed interface GameDrawable {
     /**
      * The grid cell this token occupies. The origin `(0, 0)` is the
      * top-left corner of the grid.
@@ -28,6 +22,20 @@ sealed interface GameToken {
      * top-left corner is [cellOrigin] and whose width/height are [cellSize].
      */
     fun paint(scope: DrawScope, cellOrigin: Offset, cellSize: Float)
+}
+
+/**
+ * Something that occupies a cell on the [GameGrid] and knows how to paint
+ * itself onto a Compose [Canvas][androidx.compose.foundation.Canvas].
+ *
+ * Implementations are intentionally simple, schematic graphics — the goal
+ * is gameplay clarity rather than realistic art.
+ */
+sealed interface GameToken: GameDrawable {
+    /**
+     * The name of the token.  Used in referencing from the code editor and when hovering in the grid.
+     */
+    val name: String
 }
 
 /**
@@ -44,6 +52,7 @@ data class Golem(
     override val position: Position,
     val facing: Direction,
 ) : GameToken {
+    override val name: String get() = "gol"
 
     override fun paint(scope: DrawScope, cellOrigin: Offset, cellSize: Float) {
         paint(scope, cellOrigin, cellSize, walkPhase = 0f)
@@ -362,7 +371,7 @@ data class Golem(
 data class Wall(
     override val position: Position,
     val end: Position,
-) : GameToken {
+) : GameDrawable {
 
     init {
         require(position.x == end.x || position.y == end.y) {
@@ -427,6 +436,7 @@ data class Wall(
 data class Cheese(
     override val position: Position,
 ) : GameToken {
+    override val name: String get() = "cheese"
 
     override fun paint(scope: DrawScope, cellOrigin: Offset, cellSize: Float) {
         // Reserve a small margin around the wedge so adjacent tokens stay visually distinct.

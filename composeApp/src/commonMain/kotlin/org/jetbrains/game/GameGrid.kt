@@ -44,7 +44,10 @@ data class GameGrid(
     val width: Int = GRID_SIZE,
     val height: Int = GRID_SIZE,
     val tokens: List<GameToken>,
+    val walls: List<Wall>,
 ) {
+    val elements: List<GameDrawable> get() = tokens + walls
+
     val golem: Golem
         get() = tokens.filterIsInstance<Golem>().single()
 

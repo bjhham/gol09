@@ -376,7 +376,7 @@ fun App() {
                     // the golem when no animation is in flight) render at
                     // their grid cell with no animation.
                     val activeWalk = walkAnimation
-                    for (token in grid.tokens) {
+                    for (token in grid.elements) {
                         if (token is Golem && activeWalk != null) {
                             val p = activeWalk.progress
                             val animX = activeWalk.from.x + (activeWalk.to.x - activeWalk.from.x) * p
