@@ -51,6 +51,17 @@ class GameViewModel(
     private val tickMillis: Long,
 ) : ViewModel() {
 
+    private companion object {
+        // How many on/off cycles the level-start goal flash performs.
+        const val FLASH_COUNT = 3
+
+        // Duration of the "off" portion of one flash cycle, in milliseconds.
+        const val FLASH_OFF_MILLIS = 180L
+
+        // Duration of the "on" portion of one flash cycle, in milliseconds.
+        const val FLASH_ON_MILLIS = 220L
+    }
+
     /** The freshly-parsed initial grid for the current level, or `null` while loading. */
     var initialGrid: GameGrid? by mutableStateOf(null)
         private set
@@ -75,6 +86,26 @@ class GameViewModel(
      * See [WalkAnimation] for the semantics.
      */
     var walkAnimation: WalkAnimation? by mutableStateOf(null)
+        private set
+
+    /**
+     * Alpha used by the renderer when drawing the goal cell outline.
+     *
+     * Drives the level-start "flash" that briefly toggles the goal on
+     * and off a few times so the player can spot the objective. `1f`
+     * during normal play, oscillates between `0f` and `1f` while
+     * [flashGoal] is running.
+     */
+    var goalFlashAlpha: Float by mutableStateOf(1f)
+        private set
+
+    /**
+     * Monotonically increasing counter the host UI keys its goal-flash
+     * effect off of. Bumped whenever a level (re)starts so the flash
+     * restarts even when the level index itself doesn't change (e.g.
+     * the player pressed "Play Again").
+     */
+    var goalFlashTrigger: Int by mutableStateOf(0)
         private set
 
     /**
@@ -110,6 +141,8 @@ class GameViewModel(
         gameGrid = initialGrid
         walkAnimation = null
         levelCompleteDismissed = false
+        goalFlashAlpha = 1f
+        goalFlashTrigger += 1
     }
 
     /**
@@ -134,6 +167,8 @@ class GameViewModel(
         isRunning = false
         walkAnimation = null
         levelCompleteDismissed = false
+        goalFlashAlpha = 1f
+        goalFlashTrigger += 1
     }
 
     /**
@@ -150,6 +185,29 @@ class GameViewModel(
         isRunning = false
         walkAnimation = null
         levelCompleteDismissed = false
+        goalFlashAlpha = 1f
+        goalFlashTrigger += 1
+    }
+
+    /**
+     * Briefly flash the goal cell to draw the player's attention to the
+     * objective. Toggles [goalFlashAlpha] between `0f` and `1f` a few
+     * times, then leaves it at `1f` so the goal is visible for the rest
+     * of the level. Safe to cancel: the `finally` block restores the
+     * alpha so the goal remains visible if the host effect is torn
+     * down (e.g. by switching levels mid-flash).
+     */
+    suspend fun flashGoal() {
+        try {
+            repeat(FLASH_COUNT) {
+                goalFlashAlpha = 0f
+                delay(FLASH_OFF_MILLIS)
+                goalFlashAlpha = 1f
+                delay(FLASH_ON_MILLIS)
+            }
+        } finally {
+            goalFlashAlpha = 1f
+        }
     }
 
     /**

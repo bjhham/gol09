@@ -3,7 +3,14 @@ package org.jetbrains.game
 /**
  * Parses a map file describing a single stage and produces a [GameGrid].
  *
- * The map file is a plain-text file where each non-blank line has the form:
+ * A map file optionally begins with a header section containing one or
+ * more `Header: value` entries (one per line), terminated by a blank
+ * line. Supported headers:
+ *  - `Target` — the integer score target for the level (used by
+ *    [GameGrid.target]).
+ *
+ * After the header (and the blank line separating it from the body), each
+ * non-blank, non-comment line in the body has the form:
  *
  *     OBJECT_REF X,Y
  *
@@ -20,7 +27,7 @@ package org.jetbrains.game
  *    `WALL 0-5,7` is a horizontal wall at row `7` running from column `0`
  *    to column `5` inclusive.
  *
- * Lines that are blank or that begin with `#` are ignored.
+ * Lines that are blank or that begin with `#` are ignored in the body.
  */
 class MapParser {
 
@@ -34,9 +41,17 @@ class MapParser {
         val cheeses = mutableListOf<Cheese>()
         val walls = mutableListOf<Wall>()
 
-        text.lineSequence().forEachIndexed { index, rawLine ->
+        val lines = text.lines()
+        val (headers, bodyStart) = parseHeaders(lines)
+        val target = headers["Target"]?.let { value ->
+            value.toIntOrNull()
+                ?: throw MapParseException("Invalid Target header value: '$value'")
+        } ?: 0
+
+        for (index in bodyStart until lines.size) {
+            val rawLine = lines[index]
             val line = rawLine.trim()
-            if (line.isEmpty() || line.startsWith("#")) return@forEachIndexed
+            if (line.isEmpty() || line.startsWith("#")) continue
 
             val lineNumber = index + 1
             val parts = line.split(Regex("\\s+"))
@@ -79,7 +94,49 @@ class MapParser {
 
         return GameGrid(
             tokens = listOf(Golem(position = startPos, facing = Direction.SOUTH)) + cheeses,
-            walls = walls
+            walls = walls,
+            target = target,
+        )
+    }
+
+    /**
+     * Parse the optional header section at the start of a map file.
+     *
+     * Header lines have the form `Header: value` and are terminated by
+     * the first blank line. If the file does not contain a blank line
+     * separating a header section from the body (i.e. it has no headers),
+     * an empty header map is returned and the body starts at line `0`.
+     *
+     * Returns the parsed headers along with the index of the first line
+     * of the body (the line immediately following the blank separator,
+     * or `0` if there is no header section).
+     */
+    private fun parseHeaders(lines: List<String>): Pair<Map<String, String>, Int> {
+        // No headers if the file does not start with a `Header: value` line.
+        val firstLine = lines.firstOrNull()?.trim().orEmpty()
+        if (!firstLine.contains(':')) return emptyMap<String, String>() to 0
+
+        val headers = mutableMapOf<String, String>()
+        for (index in lines.indices) {
+            val rawLine = lines[index]
+            val line = rawLine.trim()
+            if (line.isEmpty()) {
+                // Blank line terminates the header section; body starts after it.
+                return headers to index + 1
+            }
+            val colon = line.indexOf(':')
+            if (colon <= 0) {
+                throw MapParseException(
+                    "Expected '<Header>: <value>' on line ${index + 1}, got: '$line'",
+                )
+            }
+            val name = line.substring(0, colon).trim()
+            val value = line.substring(colon + 1).trim()
+            headers[name] = value
+        }
+        // Header section was never terminated by a blank line.
+        throw MapParseException(
+            "Header section must be terminated by a blank line",
         )
     }
 

@@ -79,7 +79,7 @@ fun buildInitialState(
     // Expose every renderable token on the grid as a script variable
     // named after [GameToken.name], whose value is a [Position] data
     // class instance carrying the token's grid coordinates. This lets
-    // user scripts compare positions, e.g. `gol.x == cheese.x`. Like
+    // user scripts compare positions, e.g. `gol.x == goal.x`. Like
     // the `x`/`y` getters above, each reference re-evaluates against
     // the current grid so the values stay fresh as the golem moves.
     for (token in vm.tokens) {

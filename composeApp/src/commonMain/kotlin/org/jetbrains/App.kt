@@ -48,6 +48,8 @@ import kscript.CompilationException
 import kscript.KScriptParser
 import kscript.KScriptRunner
 import kscript.parseFile
+import org.jetbrains.game.Cheese
+import org.jetbrains.game.GameDrawable
 import org.jetbrains.game.Golem
 import org.jetbrains.game.Point
 
@@ -60,7 +62,7 @@ val scriptRunner by lazy { KScriptRunner() }
  * "Next Level" button advances through the list and is hidden when the
  * player completes the final level.
  */
-private val LEVEL_MAP_PATHS = listOf(
+private val LEVELS = listOf(
     "files/maps/level0",
     "files/maps/level1",
     "files/maps/level2",
@@ -104,7 +106,7 @@ fun App() {
         // across recompositions and cleans it up automatically.
         val vm: GameViewModel = viewModel {
             GameViewModel(
-                levelMapPaths = LEVEL_MAP_PATHS,
+                levelMapPaths = LEVELS,
                 tickMillis = SIMULATION_TICK_MILLIS,
             )
         }
@@ -138,6 +140,15 @@ fun App() {
         // Load (or reload, when [vm.levelIndex] changes) the active level.
         LaunchedEffect(vm.levelIndex) {
             vm.loadLevel()
+        }
+
+        // Flash the goal cell at the start of each level so the player
+        // can immediately spot the objective. Keyed on
+        // [vm.goalFlashTrigger] (bumped by `loadLevel`/`resetLevel`) so
+        // the flash also restarts when the player presses "Play Again",
+        // not just when switching levels.
+        LaunchedEffect(vm.goalFlashTrigger) {
+            vm.flashGoal()
         }
 
         // Drive the simulation while running: execute the user's parsed `KFile`
@@ -264,9 +275,22 @@ fun App() {
                     // and `to` cells, with a non-zero walk phase so the
                     // figure bobs and its legs animate. Other tokens (and
                     // the golem when no animation is in flight) render at
-                    // their grid cell with no animation.
+                    // their grid cell with no animation. The goal cell is
+                    // drawn with [vm.goalFlashAlpha] so the level-start
+                    // flash blinks it on and off.
+                    //
+                    // Painting order: ground-wave tokens first (so the
+                    // goal highlight sits underneath the golem), then
+                    // remaining tokens by `y` descending so that, once
+                    // we add tokens that flow above their cells, the
+                    // foreground/background stacking reads as 3D.
                     val activeWalk = walkAnimation
-                    for (token in grid.elements) {
+                    val goalAlpha = vm.goalFlashAlpha
+                    val orderedElements = grid.elements.sortedWith(
+                        compareBy<GameDrawable> { it.paintWave }
+                            .thenByDescending { it.position.y }
+                    )
+                    for (token in orderedElements) {
                         if (token is Golem && activeWalk != null) {
                             val p = activeWalk.progress
                             val animX = activeWalk.from.x + (activeWalk.to.x - activeWalk.from.x) * p
@@ -281,7 +305,11 @@ fun App() {
                                 x = originX + token.position.x * cellSize,
                                 y = originY + token.position.y * cellSize,
                             )
-                            token.paint(this, cellOrigin, cellSize)
+                            if (token is Cheese) {
+                                token.paint(this, cellOrigin, cellSize, alpha = goalAlpha)
+                            } else {
+                                token.paint(this, cellOrigin, cellSize)
+                            }
                         }
                     }
                 }
@@ -328,7 +356,7 @@ fun App() {
                         // outer zero-size box at the cell's centre-x and
                         // let the tooltip size to its content using
                         // `wrapContentSize(unbounded = true)`, so longer
-                        // token names (e.g. "cheese") aren't wrapped just
+                        // token names (e.g. "goal") aren't wrapped just
                         // because they exceed the cell's width.
                         val labelXDp = with(density) {
                             (originX + (cellX + 0.5f) * cellSize).toDp()
@@ -462,7 +490,15 @@ fun App() {
         // the current level, plus — when there is a subsequent level
         // available — a "Next Level" button that advances to it.
         if (levelComplete && !vm.levelCompleteDismissed) {
-            val hasNextLevel = vm.levelIndex < LEVEL_MAP_PATHS.lastIndex
+            val hasNextLevel = vm.levelIndex < LEVELS.lastIndex
+            // Compute the player's score for the level. The score is
+            // `100 * target / tokens`, where `tokens` is the number of
+            // identifiers, literals, and keywords in the user's source.
+            // The score is then mapped to a university letter grade.
+            val target = vm.gameGrid?.target ?: 0
+            val tokenCount = remember(code) { countCodeTokens(code) }
+            val score = computeScore(target = target, tokens = tokenCount)
+            val grade = letterGrade(score)
             Box(
                 modifier = Modifier
                     .fillMaxSize()
@@ -476,12 +512,24 @@ fun App() {
                         verticalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
                         Text(
-                            text = "Level complete!",
+                            text = "Level complete",
                             style = MaterialTheme.typography.headlineSmall,
                         )
                         Text(
-                            text = "The golem reached the cheese.",
+                            text = when(grade) {
+                                "A", "A+" -> "Amazing work!  Full marks!"
+                                "A-", "B+" -> "Great job!  Nearly perfect!"
+                                "B", "B-",
+                                "C+", "C", "C-",
+                                "D+", "D", "D-" -> "Well done, you made it!"
+                                "F" -> "Not the prettiest, but you did it!"
+                                else -> "This is not a normal grade..."
+                            },
                             style = MaterialTheme.typography.bodyMedium,
+                        )
+                        Text(
+                            text = "Grade $grade",
+                            style = MaterialTheme.typography.titleMedium,
                         )
                         Row(
                             horizontalArrangement = Arrangement.spacedBy(12.dp),

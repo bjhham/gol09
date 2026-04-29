@@ -1,3 +1,5 @@
+Target: 8
+
 START 0,5
 WALL 2,2-9
 WALL 4,0-4

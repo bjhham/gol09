@@ -153,4 +153,48 @@ class MapParserTest {
             parser.parse("START 0,0\nWALL 2,5-12\n")
         }
     }
+
+    @Test
+    fun parses_target_header() {
+        val text = """
+            Target: 4
+
+            START 0,0
+            CHEESE 11,11
+        """.trimIndent()
+
+        val model = parser.parse(text)
+
+        assertEquals(4, model.target)
+        assertEquals(Point(0, 0), model.golem.position)
+        assertEquals(
+            listOf(
+                Golem(Point(0, 0), Direction.SOUTH),
+                Cheese(Point(11, 11)),
+            ),
+            model.tokens,
+        )
+    }
+
+    @Test
+    fun target_defaults_to_zero_when_no_header_section() {
+        val model = parser.parse("START 0,0\n")
+
+        assertEquals(0, model.target)
+    }
+
+    @Test
+    fun invalid_target_value_throws() {
+        assertFailsWith<MapParseException> {
+            parser.parse("Target: not-a-number\n\nSTART 0,0\n")
+        }
+    }
+
+    @Test
+    fun unterminated_header_section_throws() {
+        // A header line not followed by a blank line is malformed.
+        assertFailsWith<MapParseException> {
+            parser.parse("Target: 4\nSTART 0,0\n")
+        }
+    }
 }

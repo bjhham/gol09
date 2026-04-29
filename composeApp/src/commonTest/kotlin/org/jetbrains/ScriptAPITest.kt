@@ -36,8 +36,8 @@ class ScriptAPITest {
 
         assertEquals("2", runner.execute(parser.parseExpression("gol.x"), state).asString())
         assertEquals("3", runner.execute(parser.parseExpression("gol.y"), state).asString())
-        assertEquals("7", runner.execute(parser.parseExpression("cheese.x"), state).asString())
-        assertEquals("5", runner.execute(parser.parseExpression("cheese.y"), state).asString())
+        assertEquals("7", runner.execute(parser.parseExpression("goal.x"), state).asString())
+        assertEquals("5", runner.execute(parser.parseExpression("goal.y"), state).asString())
     }
 
     @Test
@@ -54,11 +54,11 @@ class ScriptAPITest {
 
         assertEquals(
             "true",
-            runner.execute(parser.parseExpression("gol.x == cheese.x"), state).asString(),
+            runner.execute(parser.parseExpression("gol.x == goal.x"), state).asString(),
         )
         assertEquals(
             "false",
-            runner.execute(parser.parseExpression("gol.y == cheese.y"), state).asString(),
+            runner.execute(parser.parseExpression("gol.y == goal.y"), state).asString(),
         )
     }
 
@@ -104,7 +104,7 @@ class ScriptAPITest {
         assertEquals(true, "x" in labels)
         assertEquals(true, "facing" in labels)
         assertEquals(true, "gol" in labels)
-        assertEquals(true, "cheese" in labels)
+        assertEquals(true, "goal" in labels)
         // A handful of Kotlin keywords should be included.
         assertEquals(true, "while" in labels)
         assertEquals(true, "if" in labels)

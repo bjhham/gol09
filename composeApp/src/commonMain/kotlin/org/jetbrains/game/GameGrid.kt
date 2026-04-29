@@ -36,12 +36,16 @@ enum class Direction(val vector: Point) {
  * The grid is fixed at [GRID_SIZE] x [GRID_SIZE] cells. All renderable
  * entities live in [tokens]; [golem] is provided as a convenience accessor
  * to the (single) [Golem] in the grid.
+ *
+ * [target] is the score target declared in the map file's header (the
+ * `Target` entry). It is `0` when the map file does not declare one.
  */
 data class GameGrid(
     val width: Int = GRID_SIZE,
     val height: Int = GRID_SIZE,
     val tokens: List<GameToken>,
     val walls: List<Wall> = emptyList(),
+    val target: Int = 0,
 ) {
     val elements: List<GameDrawable> get() = tokens + walls
 

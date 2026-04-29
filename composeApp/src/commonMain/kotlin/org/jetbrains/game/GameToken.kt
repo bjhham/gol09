@@ -3,12 +3,34 @@ package org.jetbrains.game
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import kotlin.math.PI
 import kotlin.math.sin
 
+
+/**
+ * Painting waves used to compose the canvas back-to-front.
+ *
+ * Tokens declare which wave they belong to via [GameDrawable.paintWave];
+ * the host renderer paints all tokens in [GROUND] first, then everything
+ * else, so cells "stepped into" (e.g. the goal outline) sit visually
+ * underneath tokens like the golem.
+ */
+object PaintWave {
+    /**
+     * Backdrop layer drawn first. Used by tokens that should appear as
+     * part of the cell itself rather than as an actor on top of it
+     * (e.g. the goal highlight the golem walks into).
+     */
+    const val GROUND: Int = 0
+
+    /**
+     * Default layer for "actor" tokens that sit on top of the ground
+     * (e.g. the golem, walls).
+     */
+    const val DEFAULT: Int = 1
+}
 
 sealed interface GameDrawable {
     /**
@@ -19,6 +41,14 @@ sealed interface GameDrawable {
 
     val x get() = position.x
     val y get() = position.y
+
+    /**
+     * Painting wave this token belongs to. Tokens in lower-numbered
+     * waves are painted first, so that later waves stack on top of
+     * them. Defaults to [PaintWave.DEFAULT]; override (e.g. in
+     * [Cheese]) to render as a backdrop.
+     */
+    val paintWave: Int get() = PaintWave.DEFAULT
 
     /**
      * Paint this token onto [scope] inside the cell rectangle whose
@@ -431,81 +461,55 @@ data class Wall(
 }
 
 /**
- * A piece of cheese sitting on the grid. Reaching the cell that contains a
- * [Cheese] completes the current level.
+ * The goal cell on the grid. Reaching the cell that contains a [Cheese]
+ * completes the current level.
  *
- * Rendered as a schematic yellow wedge with a few darker holes; the same
- * drawing is used regardless of how the player approaches it, so there are
- * no per-orientation variants.
+ * Rendered as a bright green outline of the target cell rather than a
+ * realistic depiction; we still call it `Cheese` in code (so existing
+ * callers and saved maps keep working), but expose it to user scripts
+ * under the more neutral name `goal`.
  */
 data class Cheese(
     override val position: Point,
 ) : GameToken {
-    override val name: String get() = "cheese"
+    override val name: String get() = "goal"
+
+    // Render in the ground wave so the golem appears to step *into* the
+    // highlighted cell rather than standing in front of it.
+    override val paintWave: Int get() = PaintWave.GROUND
 
     override fun paint(scope: DrawScope, cellOrigin: Offset, cellSize: Float) {
-        // Reserve a small margin around the wedge so adjacent tokens stay visually distinct.
-        val margin = cellSize * MARGIN_RATIO
-        val extent = cellSize - 2f * margin
-        val left = cellOrigin.x + margin
-        val top = cellOrigin.y + margin
+        paint(scope, cellOrigin, cellSize, alpha = 1f)
+    }
 
-        // The wedge is a right triangle filling the cell: the pointed tip
-        // is at the top-left, and the wide back runs from the top-right
-        // corner down to the bottom-right corner. This gives the iconic
-        // cartoon "slice of cheese" silhouette.
-        val tip = Offset(left, top)
-        val bottomLeft = Offset(left, top + extent)
-        val bottomRight = Offset(left + extent, top + extent)
-
-        val wedge = Path().apply {
-            moveTo(tip.x, tip.y)
-            lineTo(bottomLeft.x, bottomLeft.y)
-            lineTo(bottomRight.x, bottomRight.y)
-            close()
-        }
-        scope.drawPath(path = wedge, color = CHEESE_COLOR)
-        scope.drawPath(
-            path = wedge,
-            color = CHEESE_RIND_COLOR,
-            style = Stroke(width = extent * RIND_STROKE_RATIO),
+    /**
+     * Variant of [paint] that draws the goal outline at the given [alpha].
+     * Used by the host renderer to flash the goal cell at level start so
+     * the player can immediately see the objective.
+     */
+    fun paint(scope: DrawScope, cellOrigin: Offset, cellSize: Float, alpha: Float) {
+        if (alpha <= 0f) return
+        // Inset the rectangle by half the stroke width so the outline sits
+        // entirely inside the cell rather than overhanging neighbouring cells.
+        val stroke = cellSize * STROKE_RATIO
+        val inset = stroke / 2f
+        val left = cellOrigin.x + inset
+        val top = cellOrigin.y + inset
+        val extent = cellSize - 2f * inset
+        scope.drawRect(
+            color = GOAL_COLOR.copy(alpha = alpha.coerceIn(0f, 1f)),
+            topLeft = Offset(left, top),
+            size = Size(extent, extent),
+            style = Stroke(width = stroke),
         )
-
-        // A few darker "holes" punched into the wedge, positioned in the
-        // body of the slice rather than near the tip.
-        val holeRadius = extent * HOLE_RADIUS_RATIO
-        for ((cx, cy) in HOLE_OFFSETS) {
-            scope.drawCircle(
-                color = HOLE_COLOR,
-                radius = holeRadius,
-                center = Offset(left + extent * cx, top + extent * cy),
-            )
-        }
     }
 
     private companion object {
-        val CHEESE_COLOR = Color(0xFFFFC107)
-        val CHEESE_RIND_COLOR = Color(0xFFB8860B)
-        val HOLE_COLOR = Color(0xFFB8860B)
+        // Bright green chosen for high contrast against the dark canvas
+        // background and the muted wall colour.
+        val GOAL_COLOR = Color(0xFF00E676)
 
-        // Margin around the wedge, as a fraction of the cell size.
-        const val MARGIN_RATIO = 0.1f
-
-        // Outline thickness, as a fraction of the wedge's extent.
-        const val RIND_STROKE_RATIO = 0.04f
-
-        // Radius of each "hole", as a fraction of the wedge's extent.
-        const val HOLE_RADIUS_RATIO = 0.07f
-
-        // Centres of the holes, as `(x, y)` fractions of the wedge's extent.
-        // Chosen to sit comfortably inside the wedge body. The wedge fills
-        // the half of the cell where `y <= x`, so each centre satisfies
-        // that constraint with enough slack for the hole's radius.
-        val HOLE_OFFSETS = listOf(
-            0.12f to 0.30f,
-            0.28f to 0.54f,
-            0.48f to 0.75f,
-            0.14f to 0.82f,
-        )
+        // Outline thickness, as a fraction of the cell size.
+        const val STROKE_RATIO = 0.08f
     }
 }
