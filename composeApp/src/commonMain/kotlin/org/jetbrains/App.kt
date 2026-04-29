@@ -205,7 +205,6 @@ fun App() {
                     // toggling `isRunning` (via pause or refresh) actually
                     // stops the script between top-level executions.
                     coroutineContext.ensureActive()
-                    println("isRunning App: $isRunning")
                     if (!isRunning) break
                     val file = kFile ?: break
                     // Tick the shared loop counter for each top-level

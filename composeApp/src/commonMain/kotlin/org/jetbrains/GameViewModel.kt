@@ -83,7 +83,6 @@ class GameViewModel(
         // start *another* move after the previous one completed even
         // though the user had asked the simulation to stop.
         currentCoroutineContext().ensureActive()
-        println("isRunning move: ${isRunning()}")
         if (!isRunning()) return
         val grid = getGameGrid() ?: return
         // If the golem is already standing on the cheese, the level is
@@ -100,7 +99,6 @@ class GameViewModel(
         val target = grid.moveGolem()
         val from = grid.golem.position
         val to = target.golem.position
-        println("$from to $to")
         // Run the step inside a NonCancellable context so that pressing
         // pause mid-step lets the current move animation complete before
         // the simulation coroutine is cancelled. Cancellation will be

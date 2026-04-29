@@ -391,6 +391,41 @@ class CodeEditorTest {
     }
 
     @Test
+    fun `isCaretAtWordEnd is true at the end of a word`() {
+        // Caret immediately after the last identifier character — typical
+        // case while the user is typing a fresh word.
+        assertTrue(isCaretAtWordEnd("turn", 4))
+    }
+
+    @Test
+    fun `isCaretAtWordEnd is true when followed by punctuation or whitespace`() {
+        // "turnRight()" with the caret right after the identifier.
+        assertTrue(isCaretAtWordEnd("turnRight()", 9))
+        // "foo bar" with the caret at the space.
+        assertTrue(isCaretAtWordEnd("foo bar", 3))
+    }
+
+    @Test
+    fun `isCaretAtWordEnd is false when the caret sits inside a word`() {
+        // Caret in the middle of "turnRight" — clicking here should not
+        // trigger the autocompletion popup.
+        assertEquals(false, isCaretAtWordEnd("turnRight", 4))
+        // Caret right before the first character of the word.
+        assertEquals(false, isCaretAtWordEnd("turnRight", 0))
+        // Caret at the start of a digit continuation of the word.
+        assertEquals(false, isCaretAtWordEnd("foo123", 3))
+    }
+
+    @Test
+    fun `isCaretAtWordEnd handles edge positions`() {
+        // Caret at the very end of the buffer — always considered a word
+        // end so completions can fire on a freshly-typed identifier.
+        assertTrue(isCaretAtWordEnd("turn", 4))
+        // Empty buffer with caret at 0 — vacuously a word end.
+        assertTrue(isCaretAtWordEnd("", 0))
+    }
+
+    @Test
     fun `filterCompletions returns every item for an empty prefix`() {
         val items = listOf(
             CompletionItem("move()"),

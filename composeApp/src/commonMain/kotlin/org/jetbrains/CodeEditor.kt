@@ -207,10 +207,16 @@ fun CodeEditor(
     // typed in this editor, and gating on `isLetter` matches the user's
     // ask: the popup appears once they type an alphabetic character.
     val hasTypedPrefix = prefix.isNotEmpty() && prefix[0].isLetter()
-    val matches = remember(completions, prefix, hasTypedPrefix) {
-        if (!hasTypedPrefix) emptyList() else filterCompletions(completions, prefix)
+    // Only offer completions when the caret is at the end of the word
+    // (i.e. there's no identifier character immediately to the right).
+    // This prevents the popup from appearing when the user clicks into
+    // the middle of an already-completed identifier such as `turnRight`.
+    val caretAtWordEnd = isCaretAtWordEnd(fieldValue.text, caret)
+    val matches = remember(completions, prefix, hasTypedPrefix, caretAtWordEnd) {
+        if (!hasTypedPrefix || !caretAtWordEnd) emptyList()
+        else filterCompletions(completions, prefix)
     }
-    val popupVisible = enabled && !popupDismissed && matches.isNotEmpty() && noSelection && hasTypedPrefix
+    val popupVisible = enabled && !popupDismissed && matches.isNotEmpty() && noSelection && hasTypedPrefix && caretAtWordEnd
     LaunchedEffect(matches) {
         if (selectedIndex >= matches.size) selectedIndex = 0
     }
@@ -742,6 +748,20 @@ internal fun currentWordPrefix(text: String, caret: Int): String {
 
 private fun Char.isIdentifierStart(): Boolean = isLetter() || this == '_'
 private fun Char.isIdentifierPart(): Boolean = isLetterOrDigit() || this == '_'
+
+/**
+ * Returns `true` when [caret] sits at the end of an identifier-like word
+ * in [text] — i.e. the character immediately to the right of the caret
+ * is not part of an identifier. The caret being at the very end of [text]
+ * also counts. This is used to suppress the autocompletion popup when
+ * the user clicks into the middle of an already-typed word such as
+ * `turnRight`, where suggestions would only be a distraction.
+ */
+internal fun isCaretAtWordEnd(text: String, caret: Int): Boolean {
+    if (caret < 0 || caret > text.length) return false
+    if (caret == text.length) return true
+    return !text[caret].isIdentifierPart()
+}
 
 /**
  * Filter [items] down to those whose label starts with [prefix],
