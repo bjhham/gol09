@@ -38,6 +38,29 @@ class CodeEditorTest {
     }
 
     @Test
+    fun `flattenTokens reproduces source when a top-level call precedes a control structure`() {
+        // Regression: previously the parser drained trailing trivia into the
+        // file's children list *before* appending the call expression, which
+        // made the reconstructed source list the whitespace ahead of the call
+        // and broke highlighting for any script that started with a top-level
+        // call followed by another statement.
+        val source = "move()\nif (blocked()) {\n    turnLeft()\n}\n"
+        val kFile = parser.parseFile(source)
+        val tokens = flattenTokens(kFile)
+        val reconstructed = tokens.joinToString(separator = "") { it.value }
+        assertEquals(source, reconstructed)
+    }
+
+    @Test
+    fun `highlight produces a span when a top-level call precedes a control structure`() {
+        val source = "move()\nif (blocked()) {\n    turnLeft()\n}\n"
+        val kFile = parser.parseFile(source)
+        val annotated = highlight(source, kFile, colors)
+        assertNotNull(annotated)
+        assertEquals(source, annotated.text)
+    }
+
+    @Test
     fun `highlight returns null when kFile is null`() {
         assertNull(highlight("anything", null, colors))
     }
