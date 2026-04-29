@@ -423,10 +423,16 @@ fun App() {
                                     // Reset to the freshly-loaded initial grid for
                                     // the current level and clear any in-flight
                                     // animation so the golem starts cleanly.
+                                    // The grid reset moves the golem off the
+                                    // cheese, so `levelComplete` flips back to
+                                    // false and hides the overlay; clearing
+                                    // `levelCompleteDismissed` ensures the
+                                    // celebration appears again the next time
+                                    // the player reaches the cheese.
                                     isRunning = false
                                     gameGrid = initialGrid
                                     walkAnimation = null
-                                    levelCompleteDismissed = true
+                                    levelCompleteDismissed = false
                                 },
                             ) {
                                 Text("Play Again")
