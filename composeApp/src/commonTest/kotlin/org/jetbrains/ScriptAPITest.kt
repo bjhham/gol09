@@ -92,6 +92,47 @@ class ScriptAPITest {
         assertEquals("1", runner.execute(parser.parseExpression("gol.y"), state).asString())
     }
 
+    @Test
+    fun completionsFor_includes_bridge_functions_with_parens() {
+        val vm = viewModelFor(
+            GameGrid(
+                tokens = listOf(
+                    Golem(Point(0, 0), Direction.SOUTH),
+                    Cheese(Point(0, 5)),
+                ),
+            )
+        )
+        val state = buildInitialState(vm)
+        val labels = completionsFor(state).map { it.label }
+
+        // Bridge functions should be presented as callable, with `()`.
+        assertEquals(true, "move()" in labels, "move() missing from $labels")
+        assertEquals(true, "turnLeft()" in labels)
+        assertEquals(true, "turnRight()" in labels)
+        assertEquals(true, "warp()" in labels)
+        // Bridge getters and token variables should be bare names.
+        assertEquals(true, "x" in labels)
+        assertEquals(true, "facing" in labels)
+        assertEquals(true, "gol" in labels)
+        assertEquals(true, "cheese" in labels)
+        // A handful of Kotlin keywords should be included.
+        assertEquals(true, "while" in labels)
+        assertEquals(true, "if" in labels)
+        assertEquals(true, "val" in labels)
+    }
+
+    @Test
+    fun completionsFor_returns_a_sorted_unique_list() {
+        val vm = viewModelFor(
+            GameGrid(
+                tokens = listOf(Golem(Point(0, 0), Direction.SOUTH)),
+            )
+        )
+        val labels = completionsFor(buildInitialState(vm)).map { it.label }
+        assertEquals(labels.sortedBy { it.lowercase() }, labels)
+        assertEquals(labels.toSet().size, labels.size)
+    }
+
     private fun viewModelFor(initial: GameGrid): GameViewModel {
         var grid: GameGrid = initial
         return GameViewModel(

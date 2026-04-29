@@ -367,6 +367,31 @@ fun App() {
             // editor falls back to unstyled rendering in that case. While the
             // simulation is running the editor is disabled so the code can't
             // change underneath the runner.
+            // Autocompletion list shown by the editor. Built from the bridge
+            // declarations exposed to the script (so the user sees the same
+            // identifiers they can call) plus a small set of Kotlin keywords.
+            // The token-derived getters depend on which level is loaded, so
+            // we recompute the list whenever the grid changes — keeping the
+            // suggestions in sync with the available `Position`-typed
+            // variables. The lambdas wrapping the view model are no-ops for
+            // the purposes of name discovery: `buildInitialState` only reads
+            // [GameViewModel.tokens], which is safe to evaluate against the
+            // current grid without driving the simulation.
+            val editorCompletions = remember(gameGrid) {
+                val grid = gameGrid
+                val vm = GameViewModel(
+                    getGameGrid = { grid },
+                    setGameGrid = {},
+                    isRunning = { false },
+                    setRunning = {},
+                    getLevelIndex = { 0 },
+                    setLevelIndex = {},
+                    setWalkAnimation = {},
+                    levelMapPaths = LEVEL_MAP_PATHS,
+                    tickMillis = SIMULATION_TICK_MILLIS,
+                )
+                completionsFor(buildInitialState(vm))
+            }
             CodeEditor(
                 code = code,
                 onCodeChange = { newCode ->
@@ -380,6 +405,7 @@ fun App() {
                 },
                 kFile = kFile,
                 enabled = !isRunning,
+                completions = editorCompletions,
                 modifier = Modifier
                     .fillMaxWidth()
                     .weight(1f)

@@ -1,22 +1,34 @@
 package org.jetbrains
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.input.key.Key
@@ -25,8 +37,12 @@ import androidx.compose.ui.input.key.isShiftPressed
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -36,7 +52,14 @@ import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.input.TransformedText
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntRect
+import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Popup
+import androidx.compose.ui.window.PopupPositionProvider
+import androidx.compose.ui.window.PopupProperties
 import kscript.KComment
 import kscript.KElement
 import kscript.KFile
@@ -128,6 +151,7 @@ fun CodeEditor(
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
     colors: CodeEditorColors = defaultCodeEditorColors(),
+    completions: List<CompletionItem> = emptyList(),
 ) {
     val baseStyle = LocalTextStyle.current.merge(
         TextStyle(
@@ -156,6 +180,47 @@ fun CodeEditor(
         )
     }
 
+    // Autocompletion popup state. The popup only opens once the user has
+    // actually started typing an identifier — i.e. there is a non-empty
+    // prefix at the caret whose first character is a letter. That keeps
+    // the suggestion list from intruding on a freshly-opened or
+    // freshly-cleared line where the user hasn't expressed any intent
+    // yet. Typing more characters re-opens the popup on the next match;
+    // Escape dismisses it for the current word. [selectedIndex] is
+    // clamped back into range whenever the matches list shrinks.
+    var popupDismissed by remember { mutableStateOf(false) }
+    var selectedIndex by remember { mutableStateOf(0) }
+    // Tracked layout state used to anchor the completion popup directly
+    // beneath the caret. The text-field's [TextLayoutResult] gives us per-
+    // character cursor rects; the editor [Box]'s [LayoutCoordinates] (the
+    // popup's parent) and the [BasicTextField]'s coordinates let us
+    // translate that cursor rect into the popup's local coordinate space,
+    // accounting for the editor's vertical scroll.
+    var textLayout by remember { mutableStateOf<TextLayoutResult?>(null) }
+    var editorBoxCoords by remember { mutableStateOf<LayoutCoordinates?>(null) }
+    var textFieldCoords by remember { mutableStateOf<LayoutCoordinates?>(null) }
+    val caret = fieldValue.selection.start
+    val noSelection = fieldValue.selection.start == fieldValue.selection.end
+    val prefix = if (noSelection) currentWordPrefix(fieldValue.text, caret) else ""
+    // Require the prefix to start with a letter before offering
+    // suggestions. Underscore-led identifiers are valid Kotlin but rarely
+    // typed in this editor, and gating on `isLetter` matches the user's
+    // ask: the popup appears once they type an alphabetic character.
+    val hasTypedPrefix = prefix.isNotEmpty() && prefix[0].isLetter()
+    val matches = remember(completions, prefix, hasTypedPrefix) {
+        if (!hasTypedPrefix) emptyList() else filterCompletions(completions, prefix)
+    }
+    val popupVisible = enabled && !popupDismissed && matches.isNotEmpty() && noSelection && hasTypedPrefix
+    LaunchedEffect(matches) {
+        if (selectedIndex >= matches.size) selectedIndex = 0
+    }
+    // Re-open the popup automatically whenever the prefix changes (the user
+    // typed a new character or moved the caret into a fresh word) so a
+    // dismissal only suppresses the currently-active completion session.
+    LaunchedEffect(prefix, caret) {
+        popupDismissed = false
+    }
+
     fun applyEdit(edit: EditorEdit) {
         fieldValue = TextFieldValue(
             text = edit.text,
@@ -164,8 +229,53 @@ fun CodeEditor(
         if (edit.text != code) onCodeChange(edit.text)
     }
 
+    fun acceptSelectedCompletion(): Boolean {
+        if (!popupVisible) return false
+        val item = matches.getOrNull(selectedIndex) ?: return false
+        val current = EditorEdit(
+            text = fieldValue.text,
+            selectionStart = fieldValue.selection.start,
+            selectionEnd = fieldValue.selection.end,
+        )
+        applyEdit(applyCompletion(current, item))
+        popupDismissed = true
+        selectedIndex = 0
+        return true
+    }
+
     val keyHandler = Modifier.onPreviewKeyEvent { event ->
         if (!enabled || event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+        // When the autocompletion popup is showing, intercept the
+        // navigation keys so they drive the popup instead of moving the
+        // caret. Tab and Enter accept the highlighted suggestion; Escape
+        // dismisses the popup without touching the buffer.
+        if (popupVisible) {
+            when (event.key) {
+                Key.DirectionDown -> {
+                    selectedIndex = (selectedIndex + 1).coerceAtMost(matches.lastIndex)
+                    return@onPreviewKeyEvent true
+                }
+                Key.DirectionUp -> {
+                    selectedIndex = (selectedIndex - 1).coerceAtLeast(0)
+                    return@onPreviewKeyEvent true
+                }
+                Key.Enter, Key.NumPadEnter -> {
+                    if (event.isShiftPressed) return@onPreviewKeyEvent false
+                    return@onPreviewKeyEvent acceptSelectedCompletion()
+                }
+                Key.Tab -> {
+                    if (event.isShiftPressed) return@onPreviewKeyEvent false
+                    return@onPreviewKeyEvent acceptSelectedCompletion()
+                }
+                Key.Escape -> {
+                    popupDismissed = true
+                    return@onPreviewKeyEvent true
+                }
+                else -> {
+                    // Fall through to the regular editing key handlers below.
+                }
+            }
+        }
         val current = EditorEdit(
             text = fieldValue.text,
             selectionStart = fieldValue.selection.start,
@@ -189,10 +299,12 @@ fun CodeEditor(
     Box(
         modifier = modifier
             .background(MaterialTheme.colorScheme.surface)
-            .padding(8.dp),
+            .padding(8.dp)
+            .onGloballyPositioned { editorBoxCoords = it },
     ) {
         BasicTextField(
             value = fieldValue,
+            onTextLayout = { textLayout = it },
             onValueChange = { newValue ->
                 // Auto-pair `{`/`(` when the only thing the user did was type
                 // one of those characters. We can't reliably catch printable
@@ -235,6 +347,7 @@ fun CodeEditor(
             modifier = Modifier
                 .fillMaxSize()
                 .verticalScroll(scrollState)
+                .onGloballyPositioned { textFieldCoords = it }
                 .then(keyHandler),
             decorationBox = { innerTextField ->
                 if (fieldValue.text.isEmpty()) {
@@ -246,6 +359,196 @@ fun CodeEditor(
                 innerTextField()
             },
         )
+
+        // Compute the caret rect in the editor [Box]'s local coordinate
+        // space. We start from the [TextLayoutResult]'s cursor rect (in
+        // the BasicTextField's *content* coords, ignoring scroll), then
+        // translate the rect's top-left into the Box's coords via the two
+        // captured [LayoutCoordinates]. That mapping naturally folds in
+        // the vertical scroll offset, since `textFieldCoords` reflects
+        // the field's clipped, scrolled position. When any required piece
+        // is missing (first composition, popup not yet visible) we fall
+        // back to `null` and `CompletionPopup` will use a sensible
+        // default.
+        val caretAnchor = run {
+            val layout = textLayout
+            val boxCoords = editorBoxCoords
+            val fieldCoords = textFieldCoords
+            if (layout == null || boxCoords == null || fieldCoords == null) {
+                null
+            } else {
+                val cursorOffset = caret.coerceIn(0, layout.layoutInput.text.length)
+                val cursor = layout.getCursorRect(cursorOffset)
+                val topLeftInBox = boxCoords.localPositionOf(fieldCoords, cursor.topLeft)
+                Rect(
+                    left = topLeftInBox.x,
+                    top = topLeftInBox.y,
+                    right = topLeftInBox.x + cursor.width,
+                    bottom = topLeftInBox.y + cursor.height,
+                )
+            }
+        }
+
+        if (popupVisible) {
+            CompletionPopup(
+                items = matches,
+                selectedIndex = selectedIndex,
+                onSelect = { index ->
+                    selectedIndex = index
+                    acceptSelectedCompletion()
+                },
+                onDismiss = { popupDismissed = true },
+                colors = colors,
+                textStyle = baseStyle,
+                anchorInParent = caretAnchor,
+            )
+        }
+    }
+}
+
+/**
+ * Floating list rendered next to the caret showing the currently-matching
+ * [items]. The popup is anchored to the caret rectangle [anchorInParent]
+ * (expressed in the editor [Box]'s local coordinate space): it appears
+ * just below the caret line, but flips above the caret automatically when
+ * there isn't enough vertical room beneath it. Falling back to `null`
+ * places the popup at the editor's top-left, which only happens during
+ * the first frame before layout has settled. The highlighted entry is the
+ * one Enter/Tab will accept; clicking an entry both selects and accepts
+ * it in a single gesture.
+ */
+@Composable
+private fun CompletionPopup(
+    items: List<CompletionItem>,
+    selectedIndex: Int,
+    onSelect: (Int) -> Unit,
+    onDismiss: () -> Unit,
+    colors: CodeEditorColors,
+    textStyle: TextStyle,
+    anchorInParent: Rect?,
+) {
+    // A small gap between the caret and the popup keeps the suggestions
+    // visually distinct from the line being typed without floating too
+    // far away. Used both above and below the caret.
+    val gapPx = with(LocalDensity.current) { 4.dp.roundToPx() }
+    val anchorPx = anchorInParent?.let {
+        IntRect(
+            left = it.left.toInt(),
+            top = it.top.toInt(),
+            right = it.right.toInt(),
+            bottom = it.bottom.toInt(),
+        )
+    }
+    val positionProvider = remember(anchorPx, gapPx) {
+        CaretPopupPositionProvider(anchorPx, gapPx)
+    }
+    Popup(
+        popupPositionProvider = positionProvider,
+        onDismissRequest = onDismiss,
+        properties = PopupProperties(focusable = false),
+    ) {
+        Surface(
+            color = MaterialTheme.colorScheme.surface,
+            tonalElevation = 4.dp,
+            shadowElevation = 4.dp,
+            modifier = Modifier
+                .clip(RoundedCornerShape(4.dp))
+                .border(
+                    width = 1.dp,
+                    color = MaterialTheme.colorScheme.outline,
+                    shape = RoundedCornerShape(4.dp),
+                )
+                .widthIn(min = 160.dp, max = 320.dp)
+                .heightIn(max = 200.dp),
+        ) {
+            val scroll = rememberScrollState()
+            Column(modifier = Modifier.verticalScroll(scroll)) {
+                items.forEachIndexed { index, item ->
+                    val isSelected = index == selectedIndex
+                    val rowColor = if (isSelected) {
+                        MaterialTheme.colorScheme.primaryContainer
+                    } else {
+                        Color.Transparent
+                    }
+                    val textColor = if (isSelected) {
+                        MaterialTheme.colorScheme.onPrimaryContainer
+                    } else {
+                        colors.text
+                    }
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(rowColor)
+                            .clickable { onSelect(index) }
+                            .padding(horizontal = 8.dp, vertical = 4.dp),
+                        contentAlignment = Alignment.CenterStart,
+                    ) {
+                        Text(
+                            text = item.label,
+                            style = textStyle.copy(color = textColor),
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * [PopupPositionProvider] that places the popup just below the caret line
+ * defined by [anchorInParent], or above it when the popup would otherwise
+ * overflow the bottom of the available window. [verticalGap] is added
+ * between the caret line and the nearest edge of the popup, both above
+ * and below.
+ *
+ * When [anchorInParent] is `null` the provider falls back to the parent
+ * bounds' top-left so the popup still renders sensibly during the first
+ * frame, before layout has had a chance to settle.
+ *
+ * Horizontally, the popup is aligned to the caret's left edge but clamped
+ * to remain inside the window so it never gets cut off on either side.
+ */
+internal class CaretPopupPositionProvider(
+    private val anchorInParent: IntRect?,
+    private val verticalGap: Int,
+) : PopupPositionProvider {
+    override fun calculatePosition(
+        anchorBounds: IntRect,
+        windowSize: IntSize,
+        layoutDirection: LayoutDirection,
+        popupContentSize: IntSize,
+    ): IntOffset {
+        // Translate the caret rect — given in the editor [Box]'s local
+        // space — into window coordinates by adding the parent's top-
+        // left, which is what `anchorBounds` represents.
+        val caret = anchorInParent?.let {
+            IntRect(
+                left = anchorBounds.left + it.left,
+                top = anchorBounds.top + it.top,
+                right = anchorBounds.left + it.right,
+                bottom = anchorBounds.top + it.bottom,
+            )
+        } ?: IntRect(anchorBounds.left, anchorBounds.top, anchorBounds.left, anchorBounds.top)
+
+        // Prefer below the caret. Flip above when the popup would extend
+        // past the window's bottom edge AND there is enough room above
+        // the caret to fit it; otherwise stay below and let the system
+        // clip if necessary, which keeps behaviour predictable for very
+        // short windows.
+        val below = caret.bottom + verticalGap
+        val above = caret.top - verticalGap - popupContentSize.height
+        val y = when {
+            below + popupContentSize.height <= windowSize.height -> below
+            above >= 0 -> above
+            else -> below
+        }
+
+        // Align the popup's left edge with the caret, then clamp so the
+        // popup never extends past either side of the window.
+        val maxX = (windowSize.width - popupContentSize.width).coerceAtLeast(0)
+        val x = caret.left.coerceIn(0, maxX)
+
+        return IntOffset(x, y)
     }
 }
 
@@ -401,6 +704,79 @@ internal data class EditorEdit(
     val selectionStart: Int,
     val selectionEnd: Int,
 )
+
+/**
+ * One entry in the editor's autocompletion list.
+ *
+ * [label] is what the popup displays to the user (e.g. `"turnLeft()"` or
+ * `"while"`); [insertText] is the literal text that replaces the current
+ * word at the caret when the entry is accepted. The two are usually the
+ * same — they only differ when the inserted text needs decorations the
+ * label doesn't carry, or vice versa. The completion engine matches a
+ * typed prefix against [label] (case-insensitively, prefix-only) so the
+ * label is what the user reads *and* what they're filtering by.
+ */
+data class CompletionItem(
+    val label: String,
+    val insertText: String = label,
+)
+
+/**
+ * Extract the identifier-like word that ends at [caret] in [text]. An
+ * identifier here is the standard Kotlin shape: it must start with a
+ * letter or `_` and may continue with letters, digits, or `_`. Returns
+ * an empty string when the character immediately before the caret is
+ * not a valid identifier character — e.g. the caret sits at the start
+ * of a fresh line or right after whitespace/punctuation. The caller can
+ * use that case to mean "no prefix typed yet, show all completions".
+ */
+internal fun currentWordPrefix(text: String, caret: Int): String {
+    if (caret <= 0 || caret > text.length) return ""
+    var start = caret
+    while (start > 0 && text[start - 1].isIdentifierPart()) start--
+    // Reject prefixes whose first character is a digit — those aren't
+    // identifiers in Kotlin and should not trigger completion.
+    if (start < caret && !text[start].isIdentifierStart()) return ""
+    return text.substring(start, caret)
+}
+
+private fun Char.isIdentifierStart(): Boolean = isLetter() || this == '_'
+private fun Char.isIdentifierPart(): Boolean = isLetterOrDigit() || this == '_'
+
+/**
+ * Filter [items] down to those whose label starts with [prefix],
+ * case-insensitively. An empty [prefix] matches every item. The order
+ * of [items] is preserved so callers can pre-sort the list however they
+ * prefer (alphabetically, by relevance, etc.).
+ */
+internal fun filterCompletions(
+    items: List<CompletionItem>,
+    prefix: String,
+): List<CompletionItem> {
+    if (prefix.isEmpty()) return items
+    val lower = prefix.lowercase()
+    return items.filter { it.label.lowercase().startsWith(lower) }
+}
+
+/**
+ * Apply [item] to [edit] by replacing the identifier-like word that
+ * ends at the caret with [CompletionItem.insertText]. When the caret
+ * sits between an open paren the inserted text already provides (e.g.
+ * the user accepted `move()` while the editor had auto-paired a `(`),
+ * we still emit `move()` as-is — duplicate `()` is preferable to
+ * silently dropping characters the user can see in the popup. The
+ * resulting caret is collapsed to the end of the inserted text.
+ */
+internal fun applyCompletion(edit: EditorEdit, item: CompletionItem): EditorEdit {
+    val caret = minOf(edit.selectionStart, edit.selectionEnd)
+    val prefix = currentWordPrefix(edit.text, caret)
+    val replaceFrom = caret - prefix.length
+    val before = edit.text.substring(0, replaceFrom)
+    val after = edit.text.substring(maxOf(edit.selectionStart, edit.selectionEnd))
+    val newText = before + item.insertText + after
+    val newCaret = replaceFrom + item.insertText.length
+    return EditorEdit(newText, newCaret, newCaret)
+}
 
 /**
  * Insert [openChar] together with its matching closing character at the

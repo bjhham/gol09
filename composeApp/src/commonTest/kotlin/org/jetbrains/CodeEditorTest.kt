@@ -2,6 +2,10 @@ package org.jetbrains
 
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntRect
+import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.LayoutDirection
 import kscript.KScriptParser
 import kscript.parseFile
 import kotlin.test.Test
@@ -348,5 +352,193 @@ class CodeEditorTest {
         val previous = edit("foo{x}", 4, 5)
         val incoming = edit("foo{}}", 5)
         assertNull(detectCloseSkip(previous, incoming))
+    }
+
+    // -----------------------------------------------------------------
+    // Autocompletion helpers
+    // -----------------------------------------------------------------
+
+    @Test
+    fun `currentWordPrefix returns the identifier ending at the caret`() {
+        assertEquals("turn", currentWordPrefix("turn", 4))
+    }
+
+    @Test
+    fun `currentWordPrefix only counts the word ending at the caret`() {
+        // The caret sits in the middle of "turnLeft"; only the part up to
+        // the caret should be reported as the typed prefix.
+        assertEquals("turn", currentWordPrefix("turnLeft", 4))
+    }
+
+    @Test
+    fun `currentWordPrefix returns empty when the previous char is not an identifier part`() {
+        assertEquals("", currentWordPrefix("move() ", 7))
+        assertEquals("", currentWordPrefix("\n", 1))
+        assertEquals("", currentWordPrefix("", 0))
+    }
+
+    @Test
+    fun `currentWordPrefix returns empty when the prefix starts with a digit`() {
+        // "1foo" is not a valid Kotlin identifier, so the prefix detector
+        // should refuse to suggest completions for it.
+        assertEquals("", currentWordPrefix("1foo", 4))
+    }
+
+    @Test
+    fun `currentWordPrefix supports underscores`() {
+        assertEquals("_x", currentWordPrefix("_x", 2))
+        assertEquals("a_b", currentWordPrefix("a_b", 3))
+    }
+
+    @Test
+    fun `filterCompletions returns every item for an empty prefix`() {
+        val items = listOf(
+            CompletionItem("move()"),
+            CompletionItem("turnLeft()"),
+            CompletionItem("while"),
+        )
+        assertEquals(items, filterCompletions(items, ""))
+    }
+
+    @Test
+    fun `filterCompletions filters by case-insensitive prefix match`() {
+        val items = listOf(
+            CompletionItem("move()"),
+            CompletionItem("turnLeft()"),
+            CompletionItem("turnRight()"),
+            CompletionItem("while"),
+        )
+        val result = filterCompletions(items, "Turn")
+        assertEquals(
+            listOf(CompletionItem("turnLeft()"), CompletionItem("turnRight()")),
+            result,
+        )
+    }
+
+    @Test
+    fun `filterCompletions returns empty when nothing matches`() {
+        val items = listOf(CompletionItem("move()"), CompletionItem("while"))
+        assertEquals(emptyList(), filterCompletions(items, "z"))
+    }
+
+    @Test
+    fun `applyCompletion replaces the typed prefix with the inserted text`() {
+        // The user has typed "tur" and accepts "turnLeft()".
+        val before = edit("tur", 3)
+        val result = applyCompletion(before, CompletionItem("turnLeft()"))
+        assertEquals("turnLeft()", result.text)
+        assertEquals(10, result.selectionStart)
+        assertEquals(10, result.selectionEnd)
+    }
+
+    @Test
+    fun `applyCompletion preserves text on either side of the prefix`() {
+        // Caret in the middle of a multi-line buffer: "move()\ntur" with
+        // the caret at the end of "tur". Accepting a completion should
+        // splice it in without disturbing the surrounding code.
+        val source = "move()\ntur"
+        val before = edit(source, source.length)
+        val result = applyCompletion(before, CompletionItem("turnLeft()"))
+        assertEquals("move()\nturnLeft()", result.text)
+        assertEquals(17, result.selectionStart)
+    }
+
+    @Test
+    fun `applyCompletion inserts at the caret when there is no prefix`() {
+        val before = edit("move()\n", 7)
+        val result = applyCompletion(before, CompletionItem("while"))
+        assertEquals("move()\nwhile", result.text)
+        assertEquals(12, result.selectionStart)
+    }
+
+    // -----------------------------------------------------------------
+    // Completion popup positioning
+    // -----------------------------------------------------------------
+
+    private fun position(
+        anchorInParent: IntRect?,
+        anchorBounds: IntRect = IntRect(0, 0, 800, 600),
+        windowSize: IntSize = IntSize(800, 600),
+        popupContentSize: IntSize = IntSize(200, 100),
+        verticalGap: Int = 4,
+    ): IntOffset =
+        CaretPopupPositionProvider(anchorInParent, verticalGap).calculatePosition(
+            anchorBounds = anchorBounds,
+            windowSize = windowSize,
+            layoutDirection = LayoutDirection.Ltr,
+            popupContentSize = popupContentSize,
+        )
+
+    @Test
+    fun `caret popup is placed below the caret line by default`() {
+        // Caret line is rows 100..118 inside an 800x600 editor; popup is
+        // 200x100, so it fits comfortably below with a 4px gap.
+        val offset = position(
+            anchorInParent = IntRect(left = 50, top = 100, right = 52, bottom = 118),
+        )
+        assertEquals(IntOffset(x = 50, y = 122), offset)
+    }
+
+    @Test
+    fun `caret popup flips above the caret when there is no room below`() {
+        // Caret near the bottom of the window: 600 - 580 = 20 px below,
+        // not enough for a 100px popup, but plenty of room above.
+        val offset = position(
+            anchorInParent = IntRect(left = 50, top = 560, right = 52, bottom = 580),
+        )
+        // y = caret.top - gap - popupHeight = 560 - 4 - 100 = 456.
+        assertEquals(IntOffset(x = 50, y = 456), offset)
+    }
+
+    @Test
+    fun `caret popup stays below when neither side has enough room`() {
+        // Tiny window where neither above nor below fully fits — we keep
+        // the popup below the caret so behaviour stays predictable rather
+        // than jumping unexpectedly.
+        val offset = position(
+            anchorInParent = IntRect(left = 10, top = 30, right = 12, bottom = 50),
+            windowSize = IntSize(200, 80),
+            popupContentSize = IntSize(120, 60),
+        )
+        assertEquals(54, offset.y)
+    }
+
+    @Test
+    fun `caret popup is offset by the parent's window origin`() {
+        // The editor Box doesn't sit at (0, 0) in the window; the position
+        // provider must add `anchorBounds.topLeft` to the local caret rect.
+        val offset = position(
+            anchorInParent = IntRect(left = 50, top = 100, right = 52, bottom = 118),
+            anchorBounds = IntRect(left = 30, top = 40, right = 830, bottom = 640),
+            windowSize = IntSize(900, 700),
+        )
+        // Expected: caret in window = (30+50, 40+118) bottom = 158; popup
+        // y = 158 + 4 = 162; x = 30 + 50 = 80.
+        assertEquals(IntOffset(x = 80, y = 162), offset)
+    }
+
+    @Test
+    fun `caret popup horizontally clamps to window edges`() {
+        // Caret is so close to the right edge that the popup would overflow.
+        // It should be pulled left until it fits, but never past x = 0.
+        val offset = position(
+            anchorInParent = IntRect(left = 750, top = 100, right = 752, bottom = 118),
+            popupContentSize = IntSize(200, 50),
+        )
+        // maxX = 800 - 200 = 600, so x clamps from 750 down to 600.
+        assertEquals(600, offset.x)
+    }
+
+    @Test
+    fun `caret popup falls back to the parent origin when the anchor is null`() {
+        // Before layout has settled the editor passes a null anchor; the
+        // popup should still render somewhere sensible — at the top-left
+        // of the editor — instead of off-screen.
+        val offset = position(
+            anchorInParent = null,
+            anchorBounds = IntRect(left = 30, top = 40, right = 830, bottom = 640),
+        )
+        // Caret rect collapses to (30, 40, 30, 40); below = 40 + 4 = 44.
+        assertEquals(IntOffset(x = 30, y = 44), offset)
     }
 }

@@ -4,6 +4,7 @@ import kscript.KBoolean
 import kscript.KClassDeclaration
 import kscript.KClassInstance
 import kscript.KClassKind
+import kscript.KFunction
 import kscript.KFunctionParameter
 import kscript.KIdentifier
 import kscript.KInt
@@ -150,4 +151,50 @@ private fun positionValue(position: Point?): KClassInstance {
         Y_NAME to intValue(position?.y ?: 0),
     )
     return KClassInstance(POSITION_DECL, properties)
+}
+
+/**
+ * Kotlin keywords offered as autocompletion suggestions in the editor.
+ * Limited to the subset that's actually useful inside a top-level golem
+ * script — control-flow, declaration keywords, and a few literals — so
+ * the popup stays focused on what the user can plausibly type. Sorted
+ * alphabetically so the displayed list has a stable order regardless of
+ * how the bridge declarations are added.
+ */
+private val SCRIPT_KEYWORDS: List<String> = listOf(
+    "break", "continue", "do", "else", "false", "for", "fun", "if", "in",
+    "is", "null", "return", "true", "val", "var", "when", "while",
+).sorted()
+
+/**
+ * Build the autocompletion list shown by the code editor for the bridge
+ * declarations exposed by [state] plus a fixed set of Kotlin keywords.
+ *
+ * Each declaration in any scope on the [ProcessState] becomes one
+ * [CompletionItem]. Functions are rendered as `name()` so accepting the
+ * suggestion drops the caller straight into something callable;
+ * variables/getters keep their bare name. Duplicate names (e.g. when a
+ * scope shadows another) collapse to a single entry — the closest scope
+ * wins, which is what the runner would resolve at that point anyway.
+ * The result is sorted alphabetically by label so the popup is easy to
+ * scan.
+ */
+fun completionsFor(state: ProcessState): List<CompletionItem> {
+    val byName = LinkedHashMap<String, CompletionItem>()
+    // [ProcessState.stack] iterates innermost-scope-first; insert in that
+    // order and skip duplicates so closer scopes shadow outer ones.
+    for (scope in state.stack) {
+        for ((identifier, declaration) in scope) {
+            val name = identifier.toString()
+            if (name in byName) continue
+            val label = if (declaration is KFunction) "$name()" else name
+            byName[name] = CompletionItem(label = label, insertText = label)
+        }
+    }
+    for (keyword in SCRIPT_KEYWORDS) {
+        if (keyword !in byName) {
+            byName[keyword] = CompletionItem(label = keyword, insertText = keyword)
+        }
+    }
+    return byName.values.sortedBy { it.label.lowercase() }
 }
