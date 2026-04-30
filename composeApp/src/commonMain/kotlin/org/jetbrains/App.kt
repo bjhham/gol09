@@ -48,6 +48,7 @@ import kscript.CompilationException
 import kscript.KScriptParser
 import kscript.KScriptRunner
 import kscript.parseFile
+import org.jetbrains.audio.rememberMusicPlayer
 import org.jetbrains.game.Cheese
 import org.jetbrains.game.GameDrawable
 import org.jetbrains.game.Golem
@@ -94,6 +95,13 @@ private const val SCRIPT_LOOP_LIMIT = 10_000
  * advances the golem one cell per call.
  */
 private const val INITIAL_CODE = "move()"
+
+/**
+ * Compose Multiplatform resource path of the looping background music track
+ * played while the simulation is running. Resolved per-platform by the
+ * `MusicPlayer` `expect`/`actual` declarations in `org.jetbrains.audio`.
+ */
+private const val MUSIC_RESOURCE_PATH = "files/audio/groove.wav"
 
 @Composable
 @Preview
