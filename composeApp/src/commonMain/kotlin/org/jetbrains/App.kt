@@ -74,7 +74,7 @@ private val LEVELS = listOf(
 /**
  * Delay between simulation ticks, in milliseconds, while the simulation is running.
  */
-private const val SIMULATION_TICK_MILLIS = 200L
+private const val SIMULATION_TICK_MILLIS = 400L
 
 /**
  * Maximum number of script-loop iterations to allow before the play loop
