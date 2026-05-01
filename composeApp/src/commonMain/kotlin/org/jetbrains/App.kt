@@ -53,6 +53,7 @@ import org.jetbrains.game.Cheese
 import org.jetbrains.game.GameDrawable
 import org.jetbrains.game.Golem
 import org.jetbrains.game.Point
+import org.jetbrains.game.rememberGolemSprites
 
 val scriptParser by lazy { KScriptParser() }
 val scriptRunner by lazy { KScriptRunner() }
@@ -224,6 +225,11 @@ fun App() {
             var canvasSize by remember { mutableStateOf(IntSize.Zero) }
             var pointerOffset by remember { mutableStateOf<Offset?>(null) }
             val density = LocalDensity.current
+            // Pixel-art atlases used to render the golem. Returns `null`
+            // for the first composition while the resources are decoded
+            // off the main thread; the canvas simply skips the golem
+            // until they're available.
+            val golemSprites = rememberGolemSprites()
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -299,24 +305,41 @@ fun App() {
                             .thenByDescending { it.position.y }
                     )
                     for (token in orderedElements) {
-                        if (token is Golem && activeWalk != null) {
-                            val p = activeWalk.progress
-                            val animX = activeWalk.from.x + (activeWalk.to.x - activeWalk.from.x) * p
-                            val animY = activeWalk.from.y + (activeWalk.to.y - activeWalk.from.y) * p
-                            val cellOrigin = Offset(
-                                x = originX + animX * cellSize,
-                                y = originY + animY * cellSize,
-                            )
-                            token.paint(this, cellOrigin, cellSize, walkPhase = p)
-                        } else {
-                            val cellOrigin = Offset(
-                                x = originX + token.position.x * cellSize,
-                                y = originY + token.position.y * cellSize,
-                            )
-                            if (token is Cheese) {
-                                token.paint(this, cellOrigin, cellSize, alpha = goalAlpha)
-                            } else {
-                                token.paint(this, cellOrigin, cellSize)
+                        when {
+                            token is Golem && activeWalk != null -> {
+                                // Skip the golem entirely until its
+                                // sprite atlases have finished loading;
+                                // there is no canvas-drawn fallback.
+                                val sprites = golemSprites ?: continue
+                                val p = activeWalk.progress
+                                val animX = activeWalk.from.x +
+                                    (activeWalk.to.x - activeWalk.from.x) * p
+                                val animY = activeWalk.from.y +
+                                    (activeWalk.to.y - activeWalk.from.y) * p
+                                val cellOrigin = Offset(
+                                    x = originX + animX * cellSize,
+                                    y = originY + animY * cellSize,
+                                )
+                                token.paint(this, cellOrigin, cellSize, sprites = sprites, walkPhase = p)
+                            }
+                            token is Golem -> {
+                                val sprites = golemSprites ?: continue
+                                val cellOrigin = Offset(
+                                    x = originX + token.position.x * cellSize,
+                                    y = originY + token.position.y * cellSize,
+                                )
+                                token.paint(this, cellOrigin, cellSize, sprites = sprites)
+                            }
+                            else -> {
+                                val cellOrigin = Offset(
+                                    x = originX + token.position.x * cellSize,
+                                    y = originY + token.position.y * cellSize,
+                                )
+                                if (token is Cheese) {
+                                    token.paint(this, cellOrigin, cellSize, alpha = goalAlpha)
+                                } else {
+                                    token.paint(this, cellOrigin, cellSize)
+                                }
                             }
                         }
                     }

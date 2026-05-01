@@ -3,10 +3,14 @@ package org.jetbrains.game
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.FilterQuality
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
-import kotlin.math.PI
-import kotlin.math.sin
+import androidx.compose.ui.graphics.drawscope.scale
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntSize
+import kotlin.math.floor
 
 
 /**
@@ -74,12 +78,21 @@ sealed interface GameToken: GameDrawable {
 /**
  * The golem entity, including its current position and the direction it is facing.
  *
- * Rendered as a schematic figure within its grid cell. Three different views are
- * used depending on [facing]:
- *  - [paintFront] when facing south (towards the viewer); shows a face with eyes,
- *  - [paintBack] when facing north (away from the viewer); same silhouette, no eyes,
- *  - [paintSide] when facing east or west; a profile silhouette, mirrored when
- *    facing west.
+ * Rendered from a set of pre-authored pixel-art sprite atlases supplied
+ * via [GolemSprites]. Three different views are used depending on
+ * [facing]:
+ *  - the [front][GolemSprites.front] atlas when facing south (towards
+ *    the viewer),
+ *  - the [back][GolemSprites.back] atlas when facing north (away from
+ *    the viewer),
+ *  - the [side][GolemSprites.side] atlas when facing east; the same
+ *    atlas is mirrored horizontally when facing west.
+ *
+ * Each atlas is a horizontal strip of [GolemSprites.FRAME_COUNT] frames
+ * that the renderer cycles through to produce a walking animation. The
+ * sprite is drawn so its width fills a single grid cell while its
+ * height occupies *two* cells — the figure stands inside the cell at
+ * [position] and extends one full cell upward.
  */
 data class Golem(
     override val position: Point,
@@ -87,305 +100,121 @@ data class Golem(
 ) : GameToken {
     override val name: String get() = "gol"
 
+    /**
+     * Paints the golem without sprite assets available.
+     *
+     * The pixel-art figure can only be rendered when the [GolemSprites]
+     * atlases have been loaded; until then there is nothing to draw, so
+     * this fallback intentionally paints nothing. Use the [paint]
+     * overload that takes a [GolemSprites] (and an optional walk phase)
+     * once the assets are ready.
+     */
     override fun paint(scope: DrawScope, cellOrigin: Offset, cellSize: Float) {
-        paint(scope, cellOrigin, cellSize, walkPhase = 0f)
+        // No-op: the canvas-drawn figure has been replaced with sprite
+        // rendering. Without a [GolemSprites] reference there is nothing
+        // to paint; the host renderer skips the golem in this case.
     }
 
     /**
-     * Paints the golem with an optional walking animation applied.
+     * Paints the golem from the supplied [sprites], optionally advancing
+     * its walking animation by [walkPhase].
      *
      * [walkPhase] is the progress through a single walking cycle, in the
-     * range `[0f, 1f]`. A value of `0f` (or any whole number) renders the
-     * golem in its idle pose, identical to the base [paint] implementation.
-     * As [walkPhase] advances through a cycle the figure bobs up and down
-     * once and its legs alternate in a simple walking motion, providing
-     * visual feedback while the simulation is moving the golem between
-     * cells.
-     */
-    fun paint(scope: DrawScope, cellOrigin: Offset, cellSize: Float, walkPhase: Float) {
-        // Reserve a small margin around the figure so adjacent tokens stay visually distinct.
-        val margin = cellSize * MARGIN_RATIO
-        val extent = cellSize - 2f * margin
-        val left = cellOrigin.x + margin
-        // Apply a vertical bob: the figure rises smoothly to a peak at the
-        // middle of the cycle and returns to its resting height by the end.
-        // A negative offset shifts the figure up the canvas because `y`
-        // increases downwards.
-        val bob = -extent * BOB_AMPLITUDE_RATIO * sin(((walkPhase % 1f) * PI).toFloat())
-        val top = cellOrigin.y + margin + bob
-
-        when (facing) {
-            Direction.SOUTH -> paintFront(scope, left, top, extent, walkPhase)
-            Direction.NORTH -> paintBack(scope, left, top, extent, walkPhase)
-            Direction.EAST -> paintSide(scope, left, top, extent, mirrored = false, walkPhase = walkPhase)
-            Direction.WEST -> paintSide(scope, left, top, extent, mirrored = true, walkPhase = walkPhase)
-        }
-    }
-
-    /**
-     * Paints the front view: head with two small red square eyes, wide body
-     * with arms on both sides, and two legs.
-     */
-    private fun paintFront(scope: DrawScope, left: Float, top: Float, extent: Float, walkPhase: Float) {
-        val layout = bodyLayout(left, top, extent)
-        drawHead(scope, layout)
-        drawBody(scope, layout)
-        drawSideArms(scope, layout)
-        drawLegs(scope, layout, separated = true, walkPhase = walkPhase)
-
-        // Eyes: two small red squares on the head, distinguishing front from back.
-        val eyeSize = layout.headWidth * EYE_SIZE_RATIO
-        val eyeY = layout.headTop + layout.headHeight * EYE_VERTICAL_RATIO
-        val eyeInset = layout.headWidth * EYE_INSET_RATIO
-        val leftEyeX = layout.headLeft + eyeInset
-        val rightEyeX = layout.headLeft + layout.headWidth - eyeInset - eyeSize
-        scope.drawRect(
-            color = EYE_COLOR,
-            topLeft = Offset(leftEyeX, eyeY),
-            size = Size(eyeSize, eyeSize),
-        )
-        scope.drawRect(
-            color = EYE_COLOR,
-            topLeft = Offset(rightEyeX, eyeY),
-            size = Size(eyeSize, eyeSize),
-        )
-    }
-
-    /**
-     * Paints the back view: identical silhouette to the front, but with no
-     * eyes so that orientation is visually unambiguous.
-     */
-    private fun paintBack(scope: DrawScope, left: Float, top: Float, extent: Float, walkPhase: Float) {
-        val layout = bodyLayout(left, top, extent)
-        drawHead(scope, layout)
-        drawBody(scope, layout)
-        drawSideArms(scope, layout)
-        drawLegs(scope, layout, separated = true, walkPhase = walkPhase)
-    }
-
-    /**
-     * Paints the side (profile) view. By convention this draws the figure
-     * facing right (east); pass [mirrored] = `true` to flip it horizontally
-     * for the west-facing case.
+     * range `[0f, 1f]`. A value of `0f` (or any whole number) selects
+     * the first frame of the chosen atlas; advancing through the cycle
+     * steps through the atlas's [GolemSprites.FRAME_COUNT] frames in
+     * order, looping back to the first frame at `1f`.
      *
-     * Differences from the front/back view:
-     *  - a single arm is shown, projecting forward in the facing direction,
-     *  - the legs overlap (one in front of the other), so they're drawn
-     *    centred rather than separated.
+     * The sprite is drawn so its width matches [cellSize] and its
+     * height extends one full cell upward from [cellOrigin] — i.e. the
+     * top edge of the rendered figure sits at `cellOrigin.y - cellSize`
+     * while its bottom edge sits at `cellOrigin.y + cellSize`. When
+     * [facing] is [Direction.WEST] the side-view atlas is mirrored
+     * horizontally so the figure appears to face left.
      */
-    private fun paintSide(
+    fun paint(
         scope: DrawScope,
-        left: Float,
-        top: Float,
-        extent: Float,
-        mirrored: Boolean,
-        walkPhase: Float,
+        cellOrigin: Offset,
+        cellSize: Float,
+        sprites: GolemSprites,
+        walkPhase: Float = 0f,
     ) {
-        val layout = bodyLayout(left, top, extent)
-        drawHead(scope, layout)
-        drawBody(scope, layout)
-        drawLegs(scope, layout, separated = false, walkPhase = walkPhase)
-
-        // A single forward-projecting arm. In un-mirrored (east-facing) form it
-        // points to the right of the body; mirroring flips it to the left.
-        val armWidth = (extent - layout.bodyWidth) / 2f
-        val armHeight = layout.bodyHeight * ARM_HEIGHT_RATIO
-        val armTop = layout.bodyTop + (layout.bodyHeight - armHeight) / 2f
-        val armLeft = if (mirrored) {
-            left + armWidth
-        } else {
-            left + extent - 2f * armWidth
+        val (atlas, mirrored) = when (facing) {
+            Direction.SOUTH -> sprites.front to false
+            Direction.NORTH -> sprites.back to false
+            Direction.EAST -> sprites.side to false
+            Direction.WEST -> sprites.side to true
         }
-        scope.drawRect(
-            color = LIMB_COLOR,
-            topLeft = Offset(armLeft, armTop),
-            size = Size(armWidth, armHeight),
+
+        // Pick the current animation frame. Wrap [walkPhase] into
+        // `[0f, 1f)` first so out-of-range values still produce a valid
+        // index, then quantise to one of the [FRAME_COUNT] cells laid
+        // out horizontally in the atlas.
+        val phase = walkPhase - floor(walkPhase)
+        val frameIndex = (phase * GolemSprites.FRAME_COUNT)
+            .toInt()
+            .coerceIn(0, GolemSprites.FRAME_COUNT - 1)
+        val srcOffset = IntOffset(
+            x = frameIndex * GolemSprites.FRAME_WIDTH,
+            y = 0,
         )
-    }
-
-    /**
-     * Computes the shared head/body layout used by every view.
-     */
-    private fun bodyLayout(left: Float, top: Float, extent: Float): BodyLayout {
-        val headHeight = extent * HEAD_HEIGHT_RATIO
-        val bodyHeight = extent * BODY_HEIGHT_RATIO
-        val legsHeight = extent - headHeight - bodyHeight
-
-        val headWidth = extent * HEAD_WIDTH_RATIO
-        val headLeft = left + (extent - headWidth) / 2f
-        val headTop = top
-
-        val bodyWidth = extent * BODY_WIDTH_RATIO
-        val bodyLeft = left + (extent - bodyWidth) / 2f
-        val bodyTop = headTop + headHeight
-
-        return BodyLayout(
-            headLeft = headLeft,
-            headTop = headTop,
-            headWidth = headWidth,
-            headHeight = headHeight,
-            bodyLeft = bodyLeft,
-            bodyTop = bodyTop,
-            bodyWidth = bodyWidth,
-            bodyHeight = bodyHeight,
-            legsTop = bodyTop + bodyHeight,
-            legsHeight = legsHeight,
-            figureLeft = left,
-            figureExtent = extent,
+        val srcSize = IntSize(
+            width = GolemSprites.FRAME_WIDTH,
+            height = GolemSprites.FRAME_HEIGHT,
         )
-    }
 
-    private fun drawHead(scope: DrawScope, layout: BodyLayout) {
-        scope.drawRect(
-            color = BODY_COLOR,
-            topLeft = Offset(layout.headLeft, layout.headTop),
-            size = Size(layout.headWidth, layout.headHeight),
-        )
-    }
+        // The sprite is twice as tall as it is wide; we anchor its
+        // bottom edge to the bottom of the cell so the figure stands on
+        // the floor and extends one full cell upward.
+        val drawWidth = cellSize
+        val drawHeight = cellSize * 2f
+        val drawLeft = cellOrigin.x
+        val drawTop = cellOrigin.y - cellSize
 
-    private fun drawBody(scope: DrawScope, layout: BodyLayout) {
-        scope.drawRect(
-            color = BODY_COLOR,
-            topLeft = Offset(layout.bodyLeft, layout.bodyTop),
-            size = Size(layout.bodyWidth, layout.bodyHeight),
-        )
-    }
-
-    /**
-     * Draws two arms, one on each side of the body, used by the front/back views.
-     */
-    private fun drawSideArms(scope: DrawScope, layout: BodyLayout) {
-        val armWidth = (layout.figureExtent - layout.bodyWidth) / 2f
-        val armHeight = layout.bodyHeight * ARM_HEIGHT_RATIO
-        val armTop = layout.bodyTop + (layout.bodyHeight - armHeight) / 2f
-        scope.drawRect(
-            color = LIMB_COLOR,
-            topLeft = Offset(layout.figureLeft, armTop),
-            size = Size(armWidth, armHeight),
-        )
-        scope.drawRect(
-            color = LIMB_COLOR,
-            topLeft = Offset(layout.figureLeft + layout.figureExtent - armWidth, armTop),
-            size = Size(armWidth, armHeight),
-        )
-    }
-
-    /**
-     * Draws the legs underneath the body. In [separated] mode the legs are drawn
-     * side-by-side (front/back view); otherwise they are stacked at the centre
-     * (side view, where one leg is hidden behind the other).
-     *
-     * [walkPhase] drives a simple walking animation: when non-zero, the legs
-     * shorten and lengthen alternately to suggest stepping. In the side
-     * (un-separated) view the single visible leg also swings forward and
-     * back along the figure's facing direction.
-     */
-    private fun drawLegs(scope: DrawScope, layout: BodyLayout, separated: Boolean, walkPhase: Float) {
-        val legWidth = layout.bodyWidth * LEG_WIDTH_RATIO
-        // One full sine cycle per cell: positive lobe lifts the left leg,
-        // negative lobe lifts the right leg.
-        val swing = sin(((walkPhase % 1f) * 2f * PI).toFloat())
-        val leftLift = layout.legsHeight * LEG_LIFT_RATIO * maxOf(swing, 0f)
-        val rightLift = layout.legsHeight * LEG_LIFT_RATIO * maxOf(-swing, 0f)
-        if (separated) {
-            val legGap = layout.bodyWidth - 2f * legWidth
-            val leftLegLeft = layout.bodyLeft + (layout.bodyWidth - 2f * legWidth - legGap) / 2f
-            val rightLegLeft = leftLegLeft + legWidth + legGap
-            scope.drawRect(
-                color = LIMB_COLOR,
-                topLeft = Offset(leftLegLeft, layout.legsTop),
-                size = Size(legWidth, layout.legsHeight - leftLift),
-            )
-            scope.drawRect(
-                color = LIMB_COLOR,
-                topLeft = Offset(rightLegLeft, layout.legsTop),
-                size = Size(legWidth, layout.legsHeight - rightLift),
-            )
+        if (mirrored) {
+            // Flip horizontally about the vertical centreline of the
+            // destination rectangle so the side-view atlas faces west
+            // instead of east.
+            scope.scale(
+                scaleX = -1f,
+                scaleY = 1f,
+                pivot = Offset(drawLeft + drawWidth / 2f, drawTop + drawHeight / 2f),
+            ) {
+                drawSpriteFrame(atlas, srcOffset, srcSize, drawLeft, drawTop, drawWidth, drawHeight)
+            }
         } else {
-            // Side view: two legs are drawn, one in front of the other.
-            // While idle (`swing == 0`) they overlap exactly so the figure
-            // still reads as a profile silhouette. While walking, the two
-            // legs swing in opposite phase: one forward and lifted while
-            // the other is back and planted, then they trade roles. The
-            // back leg is drawn first so the front leg overlaps it, which
-            // preserves the side-on impression of one leg passing in front
-            // of the other.
-            val centerX = layout.bodyLeft + (layout.bodyWidth - legWidth) / 2f
-            val swingShift = legWidth * LEG_SWING_RATIO * swing
-            // The "front" leg in the figure's facing direction swings
-            // synchronously with the head's bob; the "back" leg swings in
-            // anti-phase. The lift uses the same lobed pattern as the
-            // separated case so each leg only lifts on its own swing.
-            val frontLift = layout.legsHeight * LEG_LIFT_RATIO * maxOf(swing, 0f)
-            val backLift = layout.legsHeight * LEG_LIFT_RATIO * maxOf(-swing, 0f)
-            scope.drawRect(
-                color = LIMB_COLOR,
-                topLeft = Offset(centerX - swingShift, layout.legsTop),
-                size = Size(legWidth, layout.legsHeight - backLift),
-            )
-            scope.drawRect(
-                color = LIMB_COLOR,
-                topLeft = Offset(centerX + swingShift, layout.legsTop),
-                size = Size(legWidth, layout.legsHeight - frontLift),
-            )
+            scope.drawSpriteFrame(atlas, srcOffset, srcSize, drawLeft, drawTop, drawWidth, drawHeight)
         }
     }
 
-    /**
-     * Pre-computed geometry shared by the head, body, arms, and legs renderers.
-     */
-    private data class BodyLayout(
-        val headLeft: Float,
-        val headTop: Float,
-        val headWidth: Float,
-        val headHeight: Float,
-        val bodyLeft: Float,
-        val bodyTop: Float,
-        val bodyWidth: Float,
-        val bodyHeight: Float,
-        val legsTop: Float,
-        val legsHeight: Float,
-        val figureLeft: Float,
-        val figureExtent: Float,
-    )
-
-    private companion object {
-        val BODY_COLOR = Color(0xFF9E9E9E)
-        val LIMB_COLOR = Color(0xFF616161)
-        val EYE_COLOR = Color(0xFFD32F2F)
-
-        // Margin around the entire figure, as a fraction of the cell size.
-        const val MARGIN_RATIO = 0.1f
-
-        // Vertical proportions (must sum to <= 1.0; remainder goes to legs).
-        const val HEAD_HEIGHT_RATIO = 0.27f
-        const val BODY_HEIGHT_RATIO = 0.44f
-
-        // Horizontal proportions of head/body relative to the figure's extent.
-        const val HEAD_WIDTH_RATIO = 0.39f
-        const val BODY_WIDTH_RATIO = 0.62f
-
-        // Arms: how tall they are relative to the body, and legs: how wide they are
-        // relative to the body.
-        const val ARM_HEIGHT_RATIO = 0.85f
-        const val LEG_WIDTH_RATIO = 0.30f
-
-        // Eye sizing/position, as fractions of the head's width/height.
-        const val EYE_SIZE_RATIO = 0.30f
-        const val EYE_INSET_RATIO = 0.10f
-        const val EYE_VERTICAL_RATIO = 0.40f
-
-        // How high the figure bobs at the peak of a walking cycle, as a
-        // fraction of the figure's extent.
-        const val BOB_AMPLITUDE_RATIO = 0.06f
-
-        // How much each leg shortens at the peak of its lift, as a fraction
-        // of the legs' resting height.
-        const val LEG_LIFT_RATIO = 0.45f
-
-        // How far the side-view leg swings forward/back from centre, as a
-        // fraction of the leg's width.
-        const val LEG_SWING_RATIO = 0.9f
+    private fun DrawScope.drawSpriteFrame(
+        atlas: ImageBitmap,
+        srcOffset: IntOffset,
+        srcSize: IntSize,
+        drawLeft: Float,
+        drawTop: Float,
+        drawWidth: Float,
+        drawHeight: Float,
+    ) {
+        // Quantise the destination rectangle to whole pixels: the
+        // assets are pixel art, so any sub-pixel offset would smear
+        // them under the default bilinear filter even though we ask
+        // for nearest-neighbour sampling.
+        val destLeft = drawLeft.toInt()
+        val destTop = drawTop.toInt()
+        val destWidth = (drawLeft + drawWidth).toInt() - destLeft
+        val destHeight = (drawTop + drawHeight).toInt() - destTop
+        drawImage(
+            image = atlas,
+            srcOffset = srcOffset,
+            srcSize = srcSize,
+            dstOffset = IntOffset(destLeft, destTop),
+            dstSize = IntSize(destWidth, destHeight),
+            // Nearest-neighbour sampling preserves the crisp pixel-art
+            // edges when the sprite is scaled up to the (much larger)
+            // grid cell size.
+            filterQuality = FilterQuality.None,
+        )
     }
 }
 
