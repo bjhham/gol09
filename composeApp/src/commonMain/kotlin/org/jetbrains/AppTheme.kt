@@ -1,9 +1,14 @@
 package org.jetbrains
 
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontFamily
+import gol09.composeapp.generated.resources.Res
+import gol09.composeapp.generated.resources.VT323_Regular
+import org.jetbrains.compose.resources.Font
 
 /**
  * Application-wide [MaterialTheme] wrapper.
@@ -13,12 +18,51 @@ import androidx.compose.ui.graphics.Color
  * the UI) a punchier palette than the default Material 3 baseline so that
  * keywords, literals, and other token categories stand out clearly against
  * the editor's dark background.
+ *
+ * Also overrides the default [Typography] so every text style picks up the
+ * pixel-art `VT323` font shipped in `composeResources/font/`. Using the font
+ * project-wide (rather than per call site) keeps the retro arcade feel
+ * consistent across the editor, status bar, dialogs, and overlays.
  */
 @Composable
 fun AppTheme(content: @Composable () -> Unit) {
     MaterialTheme(
         colorScheme = HighContrastDarkColors,
+        typography = appTypography(),
         content = content,
+    )
+}
+
+/**
+ * Builds a [Typography] whose every text style is rebased onto the
+ * `VT323-Regular` font family.
+ *
+ * We start from Material 3's default [Typography] so that font sizes,
+ * line heights, and letter spacing keep their carefully tuned defaults,
+ * and only swap in our custom [FontFamily]. This gives the whole UI a
+ * consistent retro look without having to enumerate every individual
+ * text style.
+ */
+@Composable
+private fun appTypography(): Typography {
+    val vt323 = FontFamily(Font(Res.font.VT323_Regular))
+    val base = Typography()
+    return Typography(
+        displayLarge = base.displayLarge.copy(fontFamily = vt323),
+        displayMedium = base.displayMedium.copy(fontFamily = vt323),
+        displaySmall = base.displaySmall.copy(fontFamily = vt323),
+        headlineLarge = base.headlineLarge.copy(fontFamily = vt323),
+        headlineMedium = base.headlineMedium.copy(fontFamily = vt323),
+        headlineSmall = base.headlineSmall.copy(fontFamily = vt323),
+        titleLarge = base.titleLarge.copy(fontFamily = vt323),
+        titleMedium = base.titleMedium.copy(fontFamily = vt323),
+        titleSmall = base.titleSmall.copy(fontFamily = vt323),
+        bodyLarge = base.bodyLarge.copy(fontFamily = vt323),
+        bodyMedium = base.bodyMedium.copy(fontFamily = vt323),
+        bodySmall = base.bodySmall.copy(fontFamily = vt323),
+        labelLarge = base.labelLarge.copy(fontFamily = vt323),
+        labelMedium = base.labelMedium.copy(fontFamily = vt323),
+        labelSmall = base.labelSmall.copy(fontFamily = vt323),
     )
 }
 

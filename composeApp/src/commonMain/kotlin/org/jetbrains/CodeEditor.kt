@@ -60,6 +60,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupPositionProvider
 import androidx.compose.ui.window.PopupProperties
+import gol09.composeapp.generated.resources.Res
+import gol09.composeapp.generated.resources.VT323_Regular
 import kscript.KComment
 import kscript.KElement
 import kscript.KFile
@@ -72,6 +74,7 @@ import kscript.KTokenType
 import kscript.KValOrVar
 import kscript.KVariableReference
 import kscript.KWhitespace
+import org.jetbrains.compose.resources.Font
 
 /**
  * Color scheme used by [CodeEditor] to render the highlighted source text.
@@ -155,7 +158,7 @@ fun CodeEditor(
 ) {
     val baseStyle = LocalTextStyle.current.merge(
         TextStyle(
-            fontFamily = FontFamily.Monospace,
+            fontFamily = FontFamily(Font(Res.font.VT323_Regular)),
             color = colors.text,
         ),
     )
