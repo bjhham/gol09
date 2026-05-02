@@ -98,6 +98,18 @@ private const val SCRIPT_LOOP_LIMIT = 10_000
 private const val INITIAL_CODE = "move()"
 
 /**
+ * Vertical scale of a grid cell, expressed as a fraction of its width.
+ *
+ * Reducing the cell height (compared to the cell width) tilts the grid
+ * forward and gives the playfield a slight isometric feel; the
+ * extruded-block walls and overhanging sprites then read as having
+ * actual height. About two thirds of the cell width gives a clear 3D
+ * impression while still leaving enough vertical room for the
+ * 12 x 12 grid in the available canvas area.
+ */
+private const val CELL_HEIGHT_RATIO: Float = 0.75f
+
+/**
  * Compose Multiplatform resource path of the looping background music track
  * played while the simulation is running. Resolved per-platform by the
  * `MusicPlayer` `expect`/`actual` declarations in `org.jetbrains.audio`.
@@ -252,21 +264,37 @@ fun App() {
                 modifier = Modifier.fillMaxSize(),
             ) {
                 currentGrid?.let { grid ->
-                    // Use square cells and centre the grid inside the canvas.
-                    val cellSize = min(
+                    // Lay out the grid with a square cell *width* but a
+                    // shorter cell *height* — the vertical extent is
+                    // about two thirds of the horizontal so the playfield
+                    // reads as a slightly tilted, isometric-ish view.
+                    // We also reserve a top margin equal to one cell
+                    // width so taller sprites (e.g. the golem standing
+                    // in the top row) and the upward extrusion of 3D
+                    // walls aren't clipped against the top edge of the
+                    // canvas.
+                    val topMargin = min(
                         size.width / grid.width,
-                        size.height / grid.height,
+                        // Don't let the margin eat the playfield on
+                        // very short canvases; cap it so the grid
+                        // itself still has reasonable height.
+                        size.height / (grid.height + 1),
                     )
-                    val gridWidth = cellSize * grid.width
-                    val gridHeight = cellSize * grid.height
+                    val cellWidth = min(
+                        size.width / grid.width,
+                        (size.height - topMargin) / (grid.height * CELL_HEIGHT_RATIO),
+                    )
+                    val cellHeight = cellWidth * CELL_HEIGHT_RATIO
+                    val gridWidth = cellWidth * grid.width
+                    val gridHeight = cellHeight * grid.height
                     val originX = (size.width - gridWidth) / 2f
-                    val originY = (size.height - gridHeight) / 2f
+                    val originY = ((size.height - topMargin - gridHeight) / 2f) + topMargin
 
-                    // Draw faint grid lines so the 24x24 cell divisions are visible.
+                    // Draw faint grid lines so the cell divisions are visible.
                     val gridLineColor = Color.White.copy(alpha = 0.25f)
                     val gridLineStroke = 1f
                     for (col in 0..grid.width) {
-                        val x = originX + col * cellSize
+                        val x = originX + col * cellWidth
                         drawLine(
                             color = gridLineColor,
                             start = Offset(x, originY),
@@ -275,7 +303,7 @@ fun App() {
                         )
                     }
                     for (row in 0..grid.height) {
-                        val y = originY + row * cellSize
+                        val y = originY + row * cellHeight
                         drawLine(
                             color = gridLineColor,
                             start = Offset(originX, y),
@@ -295,14 +323,26 @@ fun App() {
                     //
                     // Painting order: ground-wave tokens first (so the
                     // goal highlight sits underneath the golem), then
-                    // remaining tokens by `y` descending so that, once
-                    // we add tokens that flow above their cells, the
-                    // foreground/background stacking reads as 3D.
+                    // remaining tokens by `y` ascending so that
+                    // foreground rows (larger `y`, closer to the
+                    // viewer) are painted on top of background rows.
+                    // This is what makes a wall in front of the golem
+                    // occlude its legs, since the wall extrudes upward
+                    // into the row(s) behind it.
                     val activeWalk = walkAnimation
                     val goalAlpha = vm.goalFlashAlpha
-                    val orderedElements = grid.elements.sortedWith(
+                    // Expand each multi-cell wall into one drawable
+                    // per occupied cell so the row-by-row sort below
+                    // can interleave a vertical wall's cells between
+                    // a crossing horizontal wall's cells, giving the
+                    // intersection correct front/back occlusion.
+                    val expanded = buildList<GameDrawable> {
+                        for (token in grid.tokens) add(token)
+                        for (wall in grid.walls) addAll(wall.cellDrawables())
+                    }
+                    val orderedElements = expanded.sortedWith(
                         compareBy<GameDrawable> { it.paintWave }
-                            .thenByDescending { it.position.y }
+                            .thenBy { it.position.y }
                     )
                     for (token in orderedElements) {
                         when {
@@ -317,28 +357,41 @@ fun App() {
                                 val animY = activeWalk.from.y +
                                     (activeWalk.to.y - activeWalk.from.y) * p
                                 val cellOrigin = Offset(
-                                    x = originX + animX * cellSize,
-                                    y = originY + animY * cellSize,
+                                    x = originX + animX * cellWidth,
+                                    y = originY + animY * cellHeight,
                                 )
-                                token.paint(this, cellOrigin, cellSize, sprites = sprites, walkPhase = p)
+                                token.paint(
+                                    scope = this,
+                                    cellOrigin = cellOrigin,
+                                    cellWidth = cellWidth,
+                                    cellHeight = cellHeight,
+                                    sprites = sprites,
+                                    walkPhase = p,
+                                )
                             }
                             token is Golem -> {
                                 val sprites = golemSprites ?: continue
                                 val cellOrigin = Offset(
-                                    x = originX + token.position.x * cellSize,
-                                    y = originY + token.position.y * cellSize,
+                                    x = originX + token.position.x * cellWidth,
+                                    y = originY + token.position.y * cellHeight,
                                 )
-                                token.paint(this, cellOrigin, cellSize, sprites = sprites)
+                                token.paint(
+                                    scope = this,
+                                    cellOrigin = cellOrigin,
+                                    cellWidth = cellWidth,
+                                    cellHeight = cellHeight,
+                                    sprites = sprites,
+                                )
                             }
                             else -> {
                                 val cellOrigin = Offset(
-                                    x = originX + token.position.x * cellSize,
-                                    y = originY + token.position.y * cellSize,
+                                    x = originX + token.position.x * cellWidth,
+                                    y = originY + token.position.y * cellHeight,
                                 )
                                 if (token is Cheese) {
-                                    token.paint(this, cellOrigin, cellSize, alpha = goalAlpha)
+                                    token.paint(this, cellOrigin, cellWidth, cellHeight, alpha = goalAlpha)
                                 } else {
-                                    token.paint(this, cellOrigin, cellSize)
+                                    token.paint(this, cellOrigin, cellWidth, cellHeight)
                                 }
                             }
                         }

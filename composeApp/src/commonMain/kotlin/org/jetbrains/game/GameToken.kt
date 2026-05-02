@@ -56,9 +56,18 @@ sealed interface GameDrawable {
 
     /**
      * Paint this token onto [scope] inside the cell rectangle whose
-     * top-left corner is [cellOrigin] and whose width/height are [cellSize].
+     * top-left corner is [cellOrigin]. The cell is [cellWidth] pixels
+     * wide and [cellHeight] pixels tall — the two are not assumed to
+     * be equal, so that the host can render a tilted, isometric-ish
+     * grid where cells are visually shorter than they are wide while
+     * tokens still extrude up to their natural proportions.
+     *
+     * Implementations are free to draw outside the bottom of the cell
+     * rectangle (e.g. to extrude downward in a 3D effect) and above
+     * its top edge (e.g. for tall sprites). The host renderer
+     * reserves a top margin so the latter is not clipped.
      */
-    fun paint(scope: DrawScope, cellOrigin: Offset, cellSize: Float)
+    fun paint(scope: DrawScope, cellOrigin: Offset, cellWidth: Float, cellHeight: Float)
 }
 
 /**
@@ -91,8 +100,9 @@ sealed interface GameToken: GameDrawable {
  * Each atlas is a horizontal strip of [GolemSprites.FRAME_COUNT] frames
  * that the renderer cycles through to produce a walking animation. The
  * sprite is drawn so its width fills a single grid cell while its
- * height occupies *two* cells — the figure stands inside the cell at
- * [position] and extends one full cell upward.
+ * height extends one full cell width upward from the cell's bottom
+ * edge — the figure's feet rest on the cell's bottom while its head
+ * reaches up into the top margin reserved by the host renderer.
  */
 data class Golem(
     override val position: Point,
@@ -109,7 +119,7 @@ data class Golem(
      * overload that takes a [GolemSprites] (and an optional walk phase)
      * once the assets are ready.
      */
-    override fun paint(scope: DrawScope, cellOrigin: Offset, cellSize: Float) {
+    override fun paint(scope: DrawScope, cellOrigin: Offset, cellWidth: Float, cellHeight: Float) {
         // No-op: the canvas-drawn figure has been replaced with sprite
         // rendering. Without a [GolemSprites] reference there is nothing
         // to paint; the host renderer skips the golem in this case.
@@ -125,17 +135,21 @@ data class Golem(
      * steps through the atlas's [GolemSprites.FRAME_COUNT] frames in
      * order, looping back to the first frame at `1f`.
      *
-     * The sprite is drawn so its width matches [cellSize] and its
-     * height extends one full cell upward from [cellOrigin] — i.e. the
-     * top edge of the rendered figure sits at `cellOrigin.y - cellSize`
-     * while its bottom edge sits at `cellOrigin.y + cellSize`. When
-     * [facing] is [Direction.WEST] the side-view atlas is mirrored
-     * horizontally so the figure appears to face left.
+     * The sprite is drawn so its width matches [cellWidth] and its
+     * height equals twice the sprite's natural aspect ratio against
+     * [cellWidth] — i.e. the figure's bottom edge sits at
+     * `cellOrigin.y + cellHeight` and its top edge sits one cell width
+     * above the cell's bottom. With the playfield's flattened
+     * [cellHeight], this lets the head extend up into the row above
+     * (or, for the top row, into the host's reserved top margin).
+     * When [facing] is [Direction.WEST] the side-view atlas is
+     * mirrored horizontally so the figure appears to face left.
      */
     fun paint(
         scope: DrawScope,
         cellOrigin: Offset,
-        cellSize: Float,
+        cellWidth: Float,
+        cellHeight: Float,
         sprites: GolemSprites,
         walkPhase: Float = 0f,
     ) {
@@ -165,11 +179,13 @@ data class Golem(
 
         // The sprite is twice as tall as it is wide; we anchor its
         // bottom edge to the bottom of the cell so the figure stands on
-        // the floor and extends one full cell upward.
-        val drawWidth = cellSize
-        val drawHeight = cellSize * 2f
+        // the floor. The cell's height is shorter than its width on
+        // the tilted grid, so the sprite naturally extends *above*
+        // the cell's top edge into the row above.
+        val drawWidth = cellWidth
+        val drawHeight = cellWidth * 2f
         val drawLeft = cellOrigin.x
-        val drawTop = cellOrigin.y - cellSize
+        val drawTop = cellOrigin.y + cellHeight - drawHeight
 
         if (mirrored) {
             // Flip horizontally about the vertical centreline of the
@@ -226,9 +242,13 @@ data class Golem(
  * Exactly one of the dimensions varies between [position] and [end]; the
  * other is the "static" dimension and must be equal in both endpoints.
  *
- * Rendered as a thick line drawn at the leading edge of the static
- * dimension (the top edge for a horizontal wall, the left edge for a
- * vertical wall) and traced along the full length of the ranged dimension.
+ * Rendered as an extruded 3D block sitting on the leading edge of the
+ * static dimension (the top edge for a horizontal wall, the left edge
+ * for a vertical wall). The block has a flat *top face* offset upward
+ * by [HEIGHT_RATIO] of the cell width, plus a *front face* connecting
+ * the top of the block back down to the floor — so a wall in front of
+ * (south of) the golem occludes the lower part of the figure behind
+ * it.
  */
 data class Wall(
     val start: Point,
@@ -256,36 +276,156 @@ data class Wall(
         else
             start * 2 - Point(1, 1) to end * 2 - Point(-1, 1)
 
-    override fun paint(scope: DrawScope, cellOrigin: Offset, cellSize: Float) {
-        val thickness = cellSize * THICKNESS_RATIO
-        if (start.y == end.y) {
-            // Horizontal wall: thick line along the top edge of the row,
-            // running from the start cell's left edge to the end cell's
-            // right edge.
-            val length = (end.x - start.x + 1) * cellSize
-            scope.drawRect(
-                color = WALL_COLOR,
-                topLeft = Offset(cellOrigin.x, cellOrigin.y - thickness / 2f),
-                size = Size(length, thickness),
-            )
+    /**
+     * Paints the entire wall in one call, ignoring the per-row
+     * stacking that walls participate in when the host expands them
+     * via [cellDrawables]. The host renderer prefers [cellDrawables]
+     * so that, e.g., a vertical wall passing through a horizontal
+     * wall is rendered with correct front/back occlusion at the
+     * intersection. This fallback simply paints every cell in
+     * sequence so the wall is still visible if a caller skips the
+     * expansion.
+     */
+    override fun paint(scope: DrawScope, cellOrigin: Offset, cellWidth: Float, cellHeight: Float) {
+        for (drawable in cellDrawables()) {
+            val originX = cellOrigin.x + (drawable.position.x - start.x) * cellWidth
+            val originY = cellOrigin.y + (drawable.position.y - start.y) * cellHeight
+            drawable.paint(scope, Offset(originX, originY), cellWidth, cellHeight)
+        }
+    }
+
+    /**
+     * Decomposes this wall into one [GameDrawable] per occupied cell.
+     *
+     * Splitting the wall lets the host renderer interleave the wall's
+     * cells with other tokens row-by-row so that, in an isometric-ish
+     * top-down view, the parts of the wall closer to the viewer
+     * (larger `y`) paint after — and therefore on top of — anything
+     * further away. This is what makes a vertical (N–S) wall pass
+     * *behind* a horizontal (E–W) wall on the north side of the
+     * intersection and *in front* of it on the south side, instead of
+     * being uniformly painted over by whichever wall happens to be
+     * iterated last.
+     */
+    fun cellDrawables(): List<GameDrawable> {
+        val isHorizontal = start.y == end.y
+        return if (isHorizontal) {
+            (start.x..end.x).map { x -> HorizontalCell(Point(x, start.y)) }
         } else {
-            // Vertical wall: thick line along the left edge of the column,
-            // running from the start cell's top edge to the end cell's
-            // bottom edge.
-            val length = (end.y - start.y + 1) * cellSize
+            (start.y..end.y).map { y ->
+                VerticalCell(Point(start.x, y), isSouthEnd = y == end.y)
+            }
+        }
+    }
+
+    /**
+     * One cell's worth of a horizontal (E–W) wall.
+     *
+     * Each cell paints a top-face strip and a front-face slab over
+     * the cell's full width; adjacent cells abut to form the
+     * appearance of a single continuous wall.
+     */
+    private class HorizontalCell(override val position: Point) : GameDrawable {
+        override fun paint(
+            scope: DrawScope,
+            cellOrigin: Offset,
+            cellWidth: Float,
+            cellHeight: Float,
+        ) {
+            val thickness = cellWidth * THICKNESS_RATIO
+            val wallHeight = cellWidth * HEIGHT_RATIO
+            // Front face: tall slab hanging from the top of the
+            // extruded block down to just past the floor edge so it
+            // occludes anything immediately to the north.
             scope.drawRect(
-                color = WALL_COLOR,
-                topLeft = Offset(cellOrigin.x - thickness / 2f, cellOrigin.y),
-                size = Size(thickness, length),
+                color = WALL_FRONT_COLOR,
+                topLeft = Offset(
+                    x = cellOrigin.x,
+                    y = cellOrigin.y - wallHeight + thickness / 2f,
+                ),
+                size = Size(cellWidth, wallHeight),
+            )
+            // Top face: the lit horizontal strip at the very top of
+            // the block.
+            scope.drawRect(
+                color = WALL_TOP_COLOR,
+                topLeft = Offset(
+                    x = cellOrigin.x,
+                    y = cellOrigin.y - wallHeight - thickness / 2f,
+                ),
+                size = Size(cellWidth, thickness),
             )
         }
     }
 
-    private companion object {
-        val WALL_COLOR = Color(0xFF979797)
+    /**
+     * One cell's worth of a vertical (N–S) wall.
+     *
+     * Each cell paints a thin top-face strip running its own
+     * cell-height vertical extent; only the southernmost cell
+     * additionally paints a square cap showing the wall's south face,
+     * which is the only side of a vertical wall that's visible in our
+     * tilted-back oblique projection.
+     */
+    private class VerticalCell(
+        override val position: Point,
+        private val isSouthEnd: Boolean,
+    ) : GameDrawable {
+        override fun paint(
+            scope: DrawScope,
+            cellOrigin: Offset,
+            cellWidth: Float,
+            cellHeight: Float,
+        ) {
+            val thickness = cellWidth * THICKNESS_RATIO
+            val wallHeight = cellWidth * HEIGHT_RATIO
+            // Top face: the long thin strip running this cell's full
+            // N–S extent, offset upward by [wallHeight] so the wall
+            // visibly extrudes above the floor.
+            scope.drawRect(
+                color = WALL_TOP_COLOR,
+                topLeft = Offset(
+                    x = cellOrigin.x - thickness / 2f,
+                    y = cellOrigin.y - wallHeight,
+                ),
+                size = Size(thickness, cellHeight),
+            )
+            if (isSouthEnd) {
+                // South-end cap: closes off the slab with its only
+                // visible vertical face, dropping from the top of
+                // the slab down to the floor at the southern edge of
+                // the wall.
+                scope.drawRect(
+                    color = WALL_FRONT_COLOR,
+                    topLeft = Offset(
+                        x = cellOrigin.x - thickness / 2f,
+                        y = cellOrigin.y + cellHeight - wallHeight,
+                    ),
+                    size = Size(thickness, wallHeight),
+                )
+            }
+        }
+    }
 
-        // Thickness of the wall stroke, as a fraction of the cell size.
+    private companion object {
+        // Lit "top" of the block — slightly brighter than the front
+        // face so the extrusion reads as having direction (the
+        // imagined light comes from above).
+        val WALL_TOP_COLOR = Color(0xFFB5B5B5)
+
+        // Shaded "front" face of the block — the original wall grey;
+        // dimmer than the top so the cube reads as 3D.
+        val WALL_FRONT_COLOR = Color(0xFF7A7A7A)
+
+        // Thickness of the wall block's footprint, as a fraction of
+        // the cell width.
         const val THICKNESS_RATIO = 0.18f
+
+        // Visual height of the extruded block above the floor, as a
+        // fraction of the cell width. Tall enough to clearly hide
+        // the golem's legs when the figure stands directly behind a
+        // horizontal wall.
+        const val HEIGHT_RATIO = 0.45f
     }
 }
 
@@ -307,8 +447,8 @@ data class Cheese(
     // highlighted cell rather than standing in front of it.
     override val paintWave: Int get() = PaintWave.GROUND
 
-    override fun paint(scope: DrawScope, cellOrigin: Offset, cellSize: Float) {
-        paint(scope, cellOrigin, cellSize, alpha = 1f)
+    override fun paint(scope: DrawScope, cellOrigin: Offset, cellWidth: Float, cellHeight: Float) {
+        paint(scope, cellOrigin, cellWidth, cellHeight, alpha = 1f)
     }
 
     /**
@@ -316,19 +456,29 @@ data class Cheese(
      * Used by the host renderer to flash the goal cell at level start so
      * the player can immediately see the objective.
      */
-    fun paint(scope: DrawScope, cellOrigin: Offset, cellSize: Float, alpha: Float) {
+    fun paint(
+        scope: DrawScope,
+        cellOrigin: Offset,
+        cellWidth: Float,
+        cellHeight: Float,
+        alpha: Float,
+    ) {
         if (alpha <= 0f) return
         // Inset the rectangle by half the stroke width so the outline sits
         // entirely inside the cell rather than overhanging neighbouring cells.
-        val stroke = cellSize * STROKE_RATIO
+        // The stroke is sized against the cell width — keeping it
+        // proportional to the (taller) horizontal axis prevents the
+        // outline from looking spindly on the flattened cells.
+        val stroke = cellWidth * STROKE_RATIO
         val inset = stroke / 2f
         val left = cellOrigin.x + inset
         val top = cellOrigin.y + inset
-        val extent = cellSize - 2f * inset
+        val width = cellWidth - 2f * inset
+        val height = cellHeight - 2f * inset
         scope.drawRect(
             color = GOAL_COLOR.copy(alpha = alpha.coerceIn(0f, 1f)),
             topLeft = Offset(left, top),
-            size = Size(extent, extent),
+            size = Size(width, height),
             style = Stroke(width = stroke),
         )
     }
@@ -338,7 +488,7 @@ data class Cheese(
         // background and the muted wall colour.
         val GOAL_COLOR = Color(0xFF00E676)
 
-        // Outline thickness, as a fraction of the cell size.
+        // Outline thickness, as a fraction of the cell width.
         const val STROKE_RATIO = 0.08f
     }
 }
